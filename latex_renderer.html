@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Editor de Fórmulas LaTeX</title>
+    <script id="MathJax-script" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            height: 100vh;
+            /* Ocupa a altura inteira da janela */
+            margin: 0;
+            padding: 10px;
+            box-sizing: border-box;
+
+            /* --- AQUI ESTÁ A CORREÇÃO PRINCIPAL --- */
+            /* Trocamos Flexbox por CSS Grid para criar um layout rígido */
+            display: grid;
+            /* Define 3 linhas: 40% para o editor, altura automática para os controles, e o resto para o preview */
+            grid-template-rows: 40% auto 1fr;
+            gap: 8px;
+            /* Espaçamento entre os elementos */
+        }
+
+        #editor {
+            width: 100%;
+            height: 100%;
+            /* Ocupa 100% da sua linha do grid */
+            box-sizing: border-box;
+            font-family: monospace;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            resize: none;
+        }
+
+        #controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        #preview-container {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 10px;
+            overflow: auto;
+            /* Essencial para a rolagem interna */
+            background-color: #f9f9f9;
+            text-align: center;
+            /* A altura agora é controlada pelo grid, não precisa mais de flex-grow */
+            min-height: 0;
+            /* Correção para garantir que a rolagem funcione bem em layouts de grid/flex */
+        }
+
+        #preview {
+            font-size: 1.5em;
+            display: inline-block;
+            text-align: left;
+            transition: font-size 0.1s ease-in-out;
+        }
+    </style>
+</head>
+
+<body>
+    <textarea id="editor" aria-label="Editor de Fórmulas LaTeX"
+        spellcheck="false">\frac{-b \pm \sqrt{b^2-4ac}}{2a}</textarea>
+
+    <div id="controls">
+        <button id="render-btn">Renderizar Pré-visualização</button>
+        <label>
+            <input type="checkbox" id="auto-update-check" checked> Atualização Automática
+        </label>
+    </div>
+
+    <div id="preview-container">
+        <div id="preview"></div>
+    </div>
+
+    <script>
+        // O JavaScript permanece exatamente o mesmo, não precisa de alterações.
+        const editor = document.getElementById('editor');
+        const previewContainer = document.getElementById('preview-container');
+        const preview = document.getElementById('preview');
+        const renderBtn = document.getElementById('render-btn');
+        const autoUpdateCheck = document.getElementById('auto-update-check');
+        let debounceTimer;
+
+        async function renderLatex() {
+            let latexCode = editor.value.trim();
+            if (!latexCode.startsWith('$$') && !latexCode.startsWith('\\[')) {
+                latexCode = `$$${latexCode}$$`;
+            }
+            preview.innerHTML = latexCode;
+            try {
+                MathJax.startup.promise = MathJax.startup.promise
+                    .then(() => {
+                        return MathJax.typesetPromise([preview]);
+                    })
+                    .catch((err) => {
+                        preview.innerHTML = `<span style="color:red; font-size: 1rem;">Erro: ${err.message}</span>`;
+                    });
+            } catch (err) {
+                preview.innerHTML = `<span style="color:red; font-size: 1rem;">Erro inesperado: ${err.message}</span>`;
+            }
+        }
+
+        function debounceRender() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                if (autoUpdateCheck.checked) {
+                    renderLatex();
+                }
+            }, 500);
+        }
+
+        editor.addEventListener('input', debounceRender);
+        renderBtn.addEventListener('click', renderLatex);
+
+        window.getEditorContent = () => editor.value;
+        window.setEditorContent = (content) => {
+            editor.value = content || '';
+            renderLatex();
+        };
+
+        window.prepareAndTriggerDownload = async function () {
+            await renderLatex();
+            await new Promise(resolve => setTimeout(resolve, 100));
+            const svg = preview.querySelector('mjx-container > svg');
+            if (!svg) {
+                alert("Erro: Não foi possível encontrar o elemento SVG para download. A fórmula pode conter erros.");
+                return;
+            }
+            svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            const svgData = new XMLSerializer().serializeToString(svg);
+            const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "formula.svg";
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        renderLatex();
+
+        let currentZoom = 1.5;
+        const zoomStep = 0.1;
+        const minZoom = 0.5;
+        const maxZoom = 5.0;
+
+        previewContainer.addEventListener('wheel', (event) => {
+            event.preventDefault();
+            if (event.deltaY < 0) {
+                currentZoom += zoomStep;
+            } else {
+                currentZoom -= zoomStep;
+            }
+            currentZoom = Math.max(minZoom, Math.min(maxZoom, currentZoom));
+            preview.style.fontSize = `${currentZoom}em`;
+        });
+    </script>
+</body>
+
+</html>
