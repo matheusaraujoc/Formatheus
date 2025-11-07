@@ -1,5 +1,6 @@
 # dialogs.py
 # Descrição: Contém as classes de janelas de diálogo utilizadas pela aplicação.
+# Versão atualizada com propriedades QSS para o novo stylesheet.
 
 import os
 import shutil
@@ -44,6 +45,9 @@ class DialogoFigura(QDialog):
         else: self.largura_combo.setCurrentIndex(2)
 
         btn_procurar = QPushButton("Procurar...")
+        # --- MUDANÇA (Define classe QSS) ---
+        btn_procurar.setProperty("cssClass", "utility")
+        # ------------------------------------
         btn_procurar.clicked.connect(self.procurar_arquivo)
 
         caminho_layout = QHBoxLayout()
@@ -61,6 +65,13 @@ class DialogoFigura(QDialog):
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
+        
+        # --- MUDANÇA (Define classe QSS para o botão Cancelar) ---
+        cancel_button = self.buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button:
+            cancel_button.setProperty("cssClass", "utility")
+        # --------------------------------------------------------
+
         left_layout.addWidget(self.buttons)
 
         right_panel = QWidget()
@@ -82,7 +93,7 @@ class DialogoFigura(QDialog):
 
     def procurar_arquivo(self):
         caminho, _ = QFileDialog.getOpenFileName(self, "Selecionar Imagem", "",
-                  "Arquivos de Imagem (*.png *.jpg *.jpeg *.webp *.bmp *.gif)")
+                            "Arquivos de Imagem (*.png *.jpg *.jpeg *.webp *.bmp *.gif)")
         if caminho:
             self.caminho_input.setText(caminho)
             self.caminho_imagem_atual = caminho
@@ -96,8 +107,8 @@ class DialogoFigura(QDialog):
 
         pixmap = QPixmap(caminho_imagem)
         scaled_pixmap = pixmap.scaled(self.preview_label.size(),
-                                      QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                                      QtCore.Qt.TransformationMode.SmoothTransformation)
+                                        QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                                        QtCore.Qt.TransformationMode.SmoothTransformation)
         self.preview_label.setPixmap(scaled_pixmap)
 
     def resizeEvent(self, event):
@@ -181,6 +192,14 @@ class TabelaDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_add_linha = QPushButton("Adicionar Linha"); btn_del_linha = QPushButton("Remover Linha")
         btn_add_col = QPushButton("Adicionar Coluna"); btn_del_col = QPushButton("Remover Coluna")
+        
+        # --- MUDANÇA (Define classes QSS) ---
+        btn_add_linha.setProperty("cssClass", "utility")
+        btn_del_linha.setProperty("cssClass", "destructive")
+        btn_add_col.setProperty("cssClass", "utility")
+        btn_del_col.setProperty("cssClass", "destructive")
+        # ------------------------------------
+        
         btn_layout.addWidget(btn_add_linha); btn_layout.addWidget(btn_del_linha)
         btn_layout.addWidget(btn_add_col); btn_layout.addWidget(btn_del_col)
         btn_add_linha.clicked.connect(self.adicionar_linha); btn_del_linha.clicked.connect(self.remover_linha)
@@ -189,6 +208,13 @@ class TabelaDialog(QDialog):
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
+        
+        # --- MUDANÇA (Define classe QSS para o botão Cancelar) ---
+        cancel_button = self.buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button:
+            cancel_button.setProperty("cssClass", "utility")
+        # --------------------------------------------------------
+
         self.layout.addWidget(self.buttons)
 
     def accept(self):
@@ -249,6 +275,13 @@ class ReferenciaDialog(QDialog):
         self.tipo_combo.currentTextChanged.connect(self.update_form_visibility)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept); self.buttons.rejected.connect(self.reject)
+        
+        # --- MUDANÇA (Define classe QSS para o botão Cancelar) ---
+        cancel_button = self.buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button:
+            cancel_button.setProperty("cssClass", "utility")
+        # --------------------------------------------------------
+
         self.layout.addWidget(self.buttons)
         if ref: self._popular_campos(ref)
         else: self.update_form_visibility(self.tipo_combo.currentText())
@@ -342,6 +375,11 @@ class DialogoRecuperacao(QDialog):
         btn_descartar = QPushButton("Descartar Selecionados")
         btn_depois = QPushButton("Decidir Depois")
 
+        # --- MUDANÇA (Define classes QSS) ---
+        btn_descartar.setProperty("cssClass", "destructive")
+        btn_depois.setProperty("cssClass", "utility")
+        # ------------------------------------
+
         btn_recuperar.clicked.connect(self._recuperar_clicado)
         btn_descartar.clicked.connect(self._descartar_clicado)
         btn_depois.clicked.connect(self.reject) # Rejeitar significa "não fazer nada agora"
@@ -383,8 +421,8 @@ class DialogoRecuperacao(QDialog):
             return
         
         resposta = QMessageBox.question(self, "Confirmar Exclusão",
-                                          "Tem certeza que deseja descartar permanentemente os arquivos de recuperação selecionados?\n"
-                                          "Esta ação não pode ser desfeita.",
-                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                                        "Tem certeza que deseja descartar permanentemente os arquivos de recuperação selecionados?\n"
+                                        "Esta ação não pode ser desfeita.",
+                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if resposta == QMessageBox.StandardButton.Yes:
             self.accept()

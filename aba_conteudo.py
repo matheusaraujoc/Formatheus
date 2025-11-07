@@ -1,5 +1,6 @@
 # aba_conteudo.py
-# Descrição: Versão completa com QTabWidget e proporções de layout ajustadas.
+# Descrição: Versão completa com QTabWidget e propriedades QSS
+# para o novo stylesheet.
 
 import re
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -39,7 +40,10 @@ class AbaConteudo(QWidget):
         left_layout = QVBoxLayout(left_panel)
         left_panel.setMaximumWidth(350)
 
-        left_layout.addWidget(QLabel("Estrutura do Documento"))
+        label_estrutura = QLabel("Estrutura do Documento")
+        label_estrutura.setProperty("cssClass", "titulo") # Aplica estilo
+        left_layout.addWidget(label_estrutura)
+        
         self.busca_arvore_input = QLineEdit()
         self.busca_arvore_input.setPlaceholderText("Filtrar tópicos e conteúdos...")
         self.busca_arvore_input.textChanged.connect(self._filtrar_arvore)
@@ -61,6 +65,11 @@ class AbaConteudo(QWidget):
         btn_add_topico = QPushButton("Novo Tópico")
         btn_add_sub = QPushButton("Novo Subtópico")
         btn_del = QPushButton("Remover")
+        
+        # --- MUDANÇA (Define classe QSS) ---
+        btn_del.setProperty("cssClass", "destructive")
+        # ------------------------------------
+        
         btn_layout.addWidget(btn_add_topico)
         btn_layout.addWidget(btn_add_sub)
         btn_layout.addWidget(btn_del)
@@ -73,6 +82,8 @@ class AbaConteudo(QWidget):
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         self.label_capitulo_atual = QLabel("Selecione um tópico para editar")
+        self.label_capitulo_atual.setProperty("cssClass", "titulo") # Aplica estilo
+        
         self.editor_capitulo = QTextEdit()
         self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
         
@@ -95,6 +106,12 @@ class AbaConteudo(QWidget):
         btn_add_tabela = QPushButton("Criar")
         btn_edit_tabela = QPushButton("Editar")
         btn_del_tabela = QPushButton("Remover")
+        
+        # --- MUDANÇA (Define classes QSS) ---
+        btn_edit_tabela.setProperty("cssClass", "utility")
+        btn_del_tabela.setProperty("cssClass", "destructive")
+        # ------------------------------------
+        
         tabelas_btn_layout.addWidget(btn_add_tabela)
         tabelas_btn_layout.addWidget(btn_edit_tabela)
         tabelas_btn_layout.addWidget(btn_del_tabela)
@@ -119,6 +136,12 @@ class AbaConteudo(QWidget):
         btn_add_figura = QPushButton("Criar")
         btn_edit_figura = QPushButton("Editar")
         btn_del_figura = QPushButton("Remover")
+
+        # --- MUDANÇA (Define classes QSS) ---
+        btn_edit_figura.setProperty("cssClass", "utility")
+        btn_del_figura.setProperty("cssClass", "destructive")
+        # ------------------------------------
+        
         figuras_btn_layout.addWidget(btn_add_figura)
         figuras_btn_layout.addWidget(btn_edit_figura)
         figuras_btn_layout.addWidget(btn_del_figura)
@@ -143,6 +166,12 @@ class AbaConteudo(QWidget):
         btn_add_formula = QPushButton("Criar")
         btn_edit_formula = QPushButton("Editar")
         btn_del_formula = QPushButton("Remover")
+
+        # --- MUDANÇA (Define classes QSS) ---
+        btn_edit_formula.setProperty("cssClass", "utility")
+        btn_del_formula.setProperty("cssClass", "destructive")
+        # ------------------------------------
+        
         formulas_btn_layout.addWidget(btn_add_formula)
         formulas_btn_layout.addWidget(btn_edit_formula)
         formulas_btn_layout.addWidget(btn_del_formula)

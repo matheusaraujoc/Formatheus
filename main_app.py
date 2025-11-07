@@ -1,5 +1,6 @@
 # main_app.py
-# Descrição: Versão completa e corrigida da aplicação.
+# Descrição: Versão completa com integração do stylesheet
+# e chamada da função get_style_sheet() para carregar ícones.
 
 import sys
 import os
@@ -16,6 +17,10 @@ from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEd
 from PySide6.QtGui import QAction, QKeySequence, QActionGroup
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
+
+# --- IMPORTS DE ESTILO ---
+import stylesheet 
+# ------------------------
 
 # --- Assume que os arquivos abaixo estão na mesma pasta ---
 from documento import DocumentoABNT, Autor, Capitulo
@@ -63,8 +68,11 @@ class ABNTHelperApp(QWidget):
         
         self.scroll_posicao = 0
         self.main_layout = QVBoxLayout(self)
+        
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+
         self.main_content_widget = None
-                            
+                                
         self._build_ui()
         self._conectar_sinais_modificacao()
         gerenciador_recuperacao.setup_diretorios()
@@ -132,16 +140,19 @@ class ABNTHelperApp(QWidget):
         self.preview_container = self._criar_painel_preview()
 
         self.generate_btn = QPushButton("Gerar Documento .docx Final")
-        self.generate_btn.setStyleSheet("font-size: 16px; padding: 10px;")
+        self.generate_btn.setObjectName("GenerateBtn")
         self.generate_btn.clicked.connect(self._gerar_documento_final)
-        self.main_layout.addWidget(self.generate_btn)
+        self.main_layout.addWidget(self.generate_btn) 
 
-        self._reconfigurar_layout()
+        self._reconfigurar_layout() 
 
     def _criar_aba_geral(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.addWidget(QLabel("<h3>Configurações do Documento</h3>"))
+        
+        label_config = QLabel("Configurações do Documento")
+        label_config.setProperty("cssClass", "titulo")
+        layout.addWidget(label_config)
         
         form_layout1 = QFormLayout()
         self.cfg_tipo = QComboBox()
@@ -161,6 +172,7 @@ class ABNTHelperApp(QWidget):
         self.cfg_brasao_esquerdo_path = QLineEdit()
         self.cfg_brasao_esquerdo_path.setReadOnly(True)
         btn_procurar_esquerdo = QPushButton("Procurar...")
+        btn_procurar_esquerdo.setProperty("cssClass", "utility")
         brasao_esquerdo_layout.addWidget(self.cfg_brasao_esquerdo_path)
         brasao_esquerdo_layout.addWidget(btn_procurar_esquerdo)
         self.label_brasao_esquerdo = QLabel("Brasão Esquerdo/Único:")
@@ -172,6 +184,7 @@ class ABNTHelperApp(QWidget):
         self.cfg_brasao_direito_path = QLineEdit()
         self.cfg_brasao_direito_path.setReadOnly(True)
         btn_procurar_direito = QPushButton("Procurar...")
+        btn_procurar_direito.setProperty("cssClass", "utility")
         brasao_direito_layout.addWidget(self.cfg_brasao_direito_path)
         brasao_direito_layout.addWidget(btn_procurar_direito)
         self.label_brasao_direito = QLabel("Brasão Direito:")
@@ -193,7 +206,10 @@ class ABNTHelperApp(QWidget):
         form_layout1.addRow("Ano:", self.cfg_ano)
         layout.addLayout(form_layout1)
         
-        layout.addWidget(QLabel("<h3>Informações Pré-Textuais</h3>"))
+        label_pretextual = QLabel("Informações Pré-Textuais")
+        label_pretextual.setProperty("cssClass", "titulo")
+        layout.addWidget(label_pretextual)
+        
         form_layout2 = QFormLayout()
         self.titulo_input = QLineEdit()
         self.autores_input = QTextEdit()
@@ -238,8 +254,6 @@ class ABNTHelperApp(QWidget):
 
     @QtCore.Slot(str)
     def _atualizar_visibilidade_brasao(self, texto_selecionado):
-        # A verificação de _populando_ui pode até ser removida, 
-        # mas é uma boa prática mantê-la para evitar qualquer processamento desnecessário.
         if self._populando_ui: return
         
         if texto_selecionado == "Nenhum":
@@ -271,7 +285,6 @@ class ABNTHelperApp(QWidget):
             self.label_brasao_direito.setText("Brasão Direito:")
             self.label_brasao_direito.setVisible(True)
             self.brasao_direito_widget.setVisible(True)
-        # A linha self._marcar_modificado() foi removida daqui.
 
     @QtCore.Slot()
     def _voltar_tela_inicial(self):
@@ -310,12 +323,16 @@ class ABNTHelperApp(QWidget):
             self.btn_atualizar_preview.setVisible(True)
             self.main_content_widget = self.tabs
         
+        # Insere o conteúdo principal (splitter ou tabs) no índice 0, com stretch
         self.main_layout.insertWidget(0, self.main_content_widget, 1)
 
     def _criar_aba_referencias(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.addWidget(QLabel("<h3>Gerenciador de Referências</h3>"))
+        
+        label_refs = QLabel("Gerenciador de Referências")
+        label_refs.setProperty("cssClass", "titulo")
+        layout.addWidget(label_refs)
         
         self.lista_referencias = QtWidgets.QListWidget()
         self.lista_referencias.itemDoubleClicked.connect(self._editar_referencia)
@@ -325,6 +342,10 @@ class ABNTHelperApp(QWidget):
         btn_add = QPushButton("Adicionar")
         btn_edit = QPushButton("Editar Selecionada")
         btn_del = QPushButton("Remover Selecionada")
+
+        btn_edit.setProperty("cssClass", "utility")
+        btn_del.setProperty("cssClass", "destructive")
+
         btn_layout.addWidget(btn_add)
         btn_layout.addWidget(btn_edit)
         btn_layout.addWidget(btn_del)
@@ -349,6 +370,11 @@ class ABNTHelperApp(QWidget):
         btn_buscar_proximo = QPushButton("Próximo")
         self.busca_case_sensitive = QCheckBox("Diferenciar M/m")
         btn_fechar_busca = QPushButton("Fechar")
+
+        btn_buscar_anterior.setProperty("cssClass", "utility")
+        btn_buscar_proximo.setProperty("cssClass", "utility")
+        btn_fechar_busca.setProperty("cssClass", "utility") 
+
         busca_layout.addWidget(QLabel("Localizar:"))
         busca_layout.addWidget(self.busca_input)
         busca_layout.addWidget(btn_buscar_anterior)
@@ -717,6 +743,10 @@ if __name__ == '__main__':
         sys.exit(1)
 
     app = QApplication(sys.argv)
+    
+    # --- MUDANÇA (Aplica o Stylesheet global) ---
+    app.setStyleSheet(stylesheet.get_style_sheet())
+    # --------------------------------------------
     
     while True:
         gerenciador_recuperacao.setup_diretorios()

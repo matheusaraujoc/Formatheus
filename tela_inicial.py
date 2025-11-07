@@ -1,6 +1,6 @@
 # tela_inicial.py
-# Descrição: Janela de diálogo inicial para boas-vindas, gerenciamento de
-# projetos recentes e criação de novos projetos a partir de modelos.
+# Descrição: Versão com setObjectName("ProjetoRecenteItem")
+# para permitir a estilização correta do "cartão" de projeto.
 
 import os
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -17,12 +17,21 @@ class ProjetoRecenteItem(QWidget):
     """Widget customizado para exibir um item na lista de projetos recentes."""
     def __init__(self, nome, caminho, parent=None):
         super().__init__(parent)
+        
+        # --- MUDANÇA (Dá um nome ao widget para o QSS) ---
+        self.setObjectName("ProjetoRecenteItem")
+        # ------------------------------------------------
+        
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(8, 8, 8, 8) # Adiciona um padding interno
         
         nome_label = QLabel(f"<b>{nome}</b>")
+        nome_label.setWordWrap(True) # Permite quebra de linha para nomes longos
+        
         caminho_label = QLabel(caminho)
-        caminho_label.setStyleSheet("color: gray;")
+        # --- MUDANÇA (Define uma classe para o caminho) ---
+        caminho_label.setProperty("cssClass", "caminho_projeto_recente")
+        # --------------------------------------------------
         caminho_label.setWordWrap(True)
         
         layout.addWidget(nome_label)
@@ -35,20 +44,22 @@ class TelaInicial(QDialog):
         self.setWindowTitle("Bem-vindo ao ABNT Helper")
         self.setMinimumSize(950, 550)
         
+        # O stylesheet principal é aplicado no main_app.py
+        # Mas mantemos um fallback/base para a janela
         self.setStyleSheet("""
             QDialog { background-color: #f0f0f0; }
-            QPushButton { 
-                background-color: #0078d4; color: white; border: none; 
-                padding: 10px; border-radius: 5px; font-size: 14px;
+            
+            /* Estilo específico da Lista de Recentes */
+            QListWidget#ListaRecentes {
+                background-color: #f0f0f0; /* Fundo da lista (combina com a janela) */
+                border: 1px solid #dcdcdc;
+                border-radius: 5px;
             }
-            QPushButton:hover { background-color: #005a9e; }
-            #BtnAbrir, #BtnRecuperar { 
-                background-color: #e0e0e0; color: black;
-                text-align: left; padding-left: 15px;
-                white-space: normal;
+            /* Remove a borda azul feia de seleção do item */
+            QListWidget::item {
+                border: none;
+                padding: 0px; 
             }
-            #BtnAbrir:hover, #BtnRecuperar:hover { background-color: #c8c8c8; }
-            QListWidget { border: 1px solid #ccc; background-color: white; }
         """)
 
         self.resultado = (None, None) 
@@ -68,13 +79,15 @@ class TelaInicial(QDialog):
         btn_novo.clicked.connect(self.on_novo_projeto)
 
         btn_abrir = QPushButton("Abrir Outro...")
-        btn_abrir.setObjectName("BtnAbrir")
+        btn_abrir.setObjectName("BtnAbrir") # O stylesheet global vai pegar isso
+        btn_abrir.setProperty("cssClass", "utility") # Define o estilo
         btn_abrir.setIcon(self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon))
         btn_abrir.clicked.connect(self.on_abrir_projeto)
 
         # Botão de Gerenciamento de Recuperação
         btn_recuperacao = QPushButton("Gerenciar Recuperação")
-        btn_recuperacao.setObjectName("BtnRecuperar")
+        btn_recuperacao.setObjectName("BtnRecuperar") # O stylesheet global vai pegar
+        btn_recuperacao.setProperty("cssClass", "utility") # Define o estilo
         btn_recuperacao.setIcon(self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_BrowserReload))
         btn_recuperacao.clicked.connect(self.on_gerenciar_recuperacao)
 
@@ -94,6 +107,7 @@ class TelaInicial(QDialog):
         recentes_label.setFont(QtGui.QFont("Segoe UI", 16))
         
         self.lista_recentes = QListWidget()
+        self.lista_recentes.setObjectName("ListaRecentes") # ID para o QSS
         self.lista_recentes.itemDoubleClicked.connect(self.on_item_recente_clicado)
         self.popular_projetos_recentes()
         
@@ -116,7 +130,7 @@ class TelaInicial(QDialog):
         
         for nome_modelo in get_nomes_modelos():
             btn = QPushButton(nome_modelo)
-            btn.setObjectName("BtnAbrir")
+            btn.setProperty("cssClass", "utility") # Usa o estilo cinza
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             btn.clicked.connect(lambda checked=False, m=nome_modelo: self.on_novo_com_modelo(m))
             self.modelos_layout.addWidget(btn)
@@ -137,7 +151,10 @@ class TelaInicial(QDialog):
         for proj in projetos:
             item = QListWidgetItem(self.lista_recentes)
             item_widget = ProjetoRecenteItem(proj["name"], proj["path"])
-            item.setSizeHint(item_widget.sizeHint())
+            
+            # Adiciona uma margem *externa* ao item da lista
+            item.setSizeHint(item_widget.sizeHint() + QtCore.QSize(0, 8)) # Adiciona 8px de margem vertical
+            
             item.setData(QtCore.Qt.ItemDataRole.UserRole, proj["path"])
             self.lista_recentes.addItem(item)
             self.lista_recentes.setItemWidget(item, item_widget)

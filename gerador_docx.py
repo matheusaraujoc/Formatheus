@@ -1,6 +1,6 @@
 # gerador_docx.py
-# Descrição: Versão final com Capa e Folha de Rosto renderizadas
-# usando Parágrafos no corpo e o Rodapé da Seção para Cidade/Ano.
+# Descrição: Versão com a correção do recuo (TAB) na primeira
+# linha do Resumo.
 
 import os
 import re
@@ -306,8 +306,6 @@ class GeradorDOCX:
         
         # --- Conteúdo do Topo (Instituição/Brasão) ---
         if cfg.posicao_brasao == "Lados (Esquerdo e Direito)":
-            # Se usar brasões lado a lado, AINDA precisamos de uma tabela,
-            # mas apenas para o cabeçalho.
             table_header = self.doc.add_table(rows=1, cols=3)
             table_header.columns[0].width = Cm(3.5); table_header.columns[1].width = Cm(9.0); table_header.columns[2].width = Cm(3.5)
             self._set_no_border_to_table(table_header)
@@ -344,7 +342,6 @@ class GeradorDOCX:
         run_titulo.font.size = self.regras.TAMANHO_FONTE_CAPA
         
         # --- Conteúdo da Base (Cidade/Ano) NO RODAPÉ ---
-        # Pega a primeira seção (a capa, que é a seção 0)
         section = self.doc.sections[0]
         footer = section.footer
         p_final = footer.paragraphs[0]
@@ -388,12 +385,20 @@ class GeradorDOCX:
         p_final.add_run(f"{cfg.cidade.upper()}\n{cfg.ano}")
 
     
+    # --- FUNÇÃO _renderizar_resumo ATUALIZADA (COM CORREÇÃO DO TAB) ---
     def _renderizar_resumo(self):
         self.regras.aplicar_estilo_titulo_secao(self.doc, numero="", titulo_texto="RESUMO")
         
         p_resumo = self.doc.add_paragraph()
         self.regras.aplicar_estilo_resumo(p_resumo, self.doc_abnt.resumo)
-        self.doc.add_paragraph()
+        
+        # --- CORREÇÃO (Bug do Recuo do Resumo) ---
+        # Adiciona o recuo da primeira linha, pois a ABNT exige que o
+        # resumo seja um parágrafo único (e parágrafos têm recuo).
+        p_resumo.paragraph_format.first_line_indent = self.regras.RECUO_PRIMEIRA_LINHA
+        # --- FIM DA CORREÇÃO ---
+
+        self.doc.add_paragraph() # Espaçamento entre Resumo e Palavras-chave
         
         p_kw = self.doc.add_paragraph()
         run_kw = p_kw.add_run("Palavras-chave: ")

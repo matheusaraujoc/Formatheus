@@ -1,4 +1,6 @@
 # DialogoFormula.py
+# Descrição: Versão com propriedades QSS para o novo stylesheet.
+
 import os
 import tempfile
 
@@ -54,6 +56,13 @@ class DialogoFormula(QDialog):
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.trigger_save_process)
         self.buttons.rejected.connect(self.reject)
+        
+        # --- MUDANÇA (Define classe QSS para o botão Cancelar) ---
+        cancel_button = self.buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button:
+            cancel_button.setProperty("cssClass", "utility")
+        # --------------------------------------------------------
+
         layout.addWidget(self.buttons)
 
     def trigger_save_process(self):
@@ -97,7 +106,6 @@ class DialogoFormula(QDialog):
             self._restore_ui_state()
             download_request.cancel()
 
-    # AQUI ESTÁ A CORREÇÃO (QWebEngineDownloadRequest.state com 's' minúsculo)
     @QtCore.Slot()
     def _on_download_state_changed(self, state: QWebEngineDownloadRequest.state):
         if state == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:

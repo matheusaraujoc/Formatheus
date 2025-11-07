@@ -1,11 +1,12 @@
 # dialogo_tabela.py
 # Descrição: Janela de diálogo para a criação e edição detalhada de tabelas.
+# Versão atualizada com propriedades QSS.
 
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QLineEdit, QComboBox,
                                QPushButton, QVBoxLayout, QHBoxLayout, 
                                QTableWidget, QTableWidgetItem, QDialogButtonBox,
-                               QMessageBox) # ADICIONADO: QMessageBox para o alerta
+                               QMessageBox)
 
 from documento import Tabela
 
@@ -38,8 +39,18 @@ class TabelaDialog(QDialog):
         self.layout.addWidget(self.table_widget)
 
         btn_layout = QHBoxLayout()
-        btn_add_linha = QPushButton("Adicionar Linha"); btn_del_linha = QPushButton("Remover Linha")
-        btn_add_col = QPushButton("Adicionar Coluna"); btn_del_col = QPushButton("Remover Coluna")
+        btn_add_linha = QPushButton("Adicionar Linha")
+        btn_del_linha = QPushButton("Remover Linha")
+        btn_add_col = QPushButton("Adicionar Coluna")
+        btn_del_col = QPushButton("Remover Coluna")
+        
+        # --- MUDANÇA (Define classes QSS) ---
+        btn_add_linha.setProperty("cssClass", "utility")
+        btn_del_linha.setProperty("cssClass", "destructive")
+        btn_add_col.setProperty("cssClass", "utility")
+        btn_del_col.setProperty("cssClass", "destructive")
+        # ------------------------------------
+
         btn_layout.addWidget(btn_add_linha); btn_layout.addWidget(btn_del_linha)
         btn_layout.addWidget(btn_add_col); btn_layout.addWidget(btn_del_col)
         btn_add_linha.clicked.connect(self.adicionar_linha); btn_del_linha.clicked.connect(self.remover_linha)
@@ -47,28 +58,27 @@ class TabelaDialog(QDialog):
         self.layout.addLayout(btn_layout)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.buttons.accepted.connect(self.accept) # Esta conexão agora chama nosso método personalizado
+        self.buttons.accepted.connect(self.accept) 
         self.buttons.rejected.connect(self.reject)
+        
+        # --- MUDANÇA (Define classe QSS para o botão Cancelar) ---
+        cancel_button = self.buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_button:
+            cancel_button.setProperty("cssClass", "utility")
+        # --------------------------------------------------------
+
         self.layout.addWidget(self.buttons)
 
-    # =============================================================================
-    # NOVO MÉTODO: Sobrescreve o comportamento padrão do botão "OK"
-    # =============================================================================
     def accept(self):
         """
         Executa a validação ANTES de fechar a janela.
         """
-        # 1. Verifica se o título está vazio
         if not self.titulo_input.text().strip():
-            # 2. Se estiver vazio, exibe o alerta
             QMessageBox.warning(self, "Título Obrigatório", 
-                                      "O título da tabela não pode estar vazio. Por favor, preencha o campo para salvar.")
-            # 3. Impede o fechamento da janela ao não chamar super().accept()
+                                "O título da tabela não pode estar vazio. Por favor, preencha o campo para salvar.")
             return
         
-        # 4. Se o título for válido, chama o comportamento padrão para fechar a janela
         super().accept()
-    # =============================================================================
 
     def popular_tabela_widget(self):
         dados = self.tabela.dados
