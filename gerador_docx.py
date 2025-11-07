@@ -214,8 +214,30 @@ class GeradorDOCX:
                 run.font.name = self.regras.FONTE_PADRAO
                 run.font.size = self.regras.TAMANHO_FONTE_LEGENDA
                 run.font.color.rgb = self.regras.COR_FONTE_PADRAO
+                
+                # --- INÍCIO DA CORREÇÃO ---
+                
+                # 1. Cabeçalho (linha 0) é SEMPRE centralizado
                 if i == 0:
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                
+                # 2. Conteúdo (outras linhas)
+                else:
+                    if tabela_obj.centralizar_conteudo:
+                        p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                    else:
+                        # DEVE SER EXPLÍCITO para anular a centralização anterior
+                        p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+                
+                # --- FIM DA CORREÇÃO ---
+
+        if tabela_obj.estilo_borda == 'abnt':
+            self.regras.aplicar_estilo_tabela_abnt(t)
+
+        if tabela_obj.fonte:
+            p_fonte = self.doc.add_paragraph()
+            p_fonte.add_run(f"Fonte: {tabela_obj.fonte}")
+            self.regras.aplicar_estilo_legenda(p_fonte, is_titulo=False)
 
         if tabela_obj.estilo_borda == 'abnt':
             self.regras.aplicar_estilo_tabela_abnt(t)

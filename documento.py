@@ -14,6 +14,7 @@ class Tabela:
     dados: List[List[str]] = field(default_factory=list)
     estilo_borda: str = 'abnt'
     numero: int = 0
+    centralizar_conteudo: bool = True
 
 @dataclass
 class Figura:

@@ -9,7 +9,8 @@ from PySide6.QtWidgets import (QWidget, QLabel, QTextEdit, QPushButton, QListWid
                                QTreeWidgetItem, QInputDialog, QAbstractItemView, QLineEdit, QTabWidget)
 
 from documento import Capitulo, Tabela, Figura, Formula
-from dialogs import TabelaDialog, DialogoFigura
+from dialogo_tabela import TabelaDialog
+from dialogo_figura import DialogoFigura
 from DialogoFormula import DialogoFormula
 
 class ArvoreConteudo(QTreeWidget):

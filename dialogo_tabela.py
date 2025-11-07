@@ -1,12 +1,12 @@
 # dialogo_tabela.py
 # Descrição: Janela de diálogo para a criação e edição detalhada de tabelas.
-# Versão atualizada com propriedades QSS.
+# Versão atualizada com opção de centralização de conteúdo.
 
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QLineEdit, QComboBox,
                                QPushButton, QVBoxLayout, QHBoxLayout, 
                                QTableWidget, QTableWidgetItem, QDialogButtonBox,
-                               QMessageBox)
+                               QMessageBox, QCheckBox) # Adicionado QCheckBox
 
 from documento import Tabela
 
@@ -28,10 +28,21 @@ class TabelaDialog(QDialog):
         if self.tabela.estilo_borda == 'grade':
             self.estilo_borda_combo.setCurrentIndex(1)
         
+        # --- NOVO CHECKBOX DE CENTRALIZAÇÃO ---
+        self.centralizar_check = QCheckBox("Centralizar conteúdo das células (Padrão ABNT)")
+        self.centralizar_check.setChecked(self.tabela.centralizar_conteudo)
+        self.centralizar_check.setToolTip(
+            "Desmarque esta opção apenas em casos específicos onde a ABNT\n"
+            "permite alinhamento à esquerda (ex: tabelas com muito texto)."
+        )
+        # --- FIM DO NOVO CHECKBOX ---
+        
         form_layout = QtWidgets.QFormLayout()
         form_layout.addRow("Título (sem a palavra 'Tabela X'):", self.titulo_input)
         form_layout.addRow("Fonte:", self.fonte_input)
         form_layout.addRow("Estilo da Borda:", self.estilo_borda_combo)
+        form_layout.addRow(self.centralizar_check) # Adiciona o checkbox ao formulário
+        
         self.layout.addLayout(form_layout)
 
         self.table_widget = QTableWidget()
@@ -105,6 +116,10 @@ class TabelaDialog(QDialog):
         self.tabela.titulo = self.titulo_input.text()
         self.tabela.fonte = self.fonte_input.text()
         self.tabela.estilo_borda = 'abnt' if self.estilo_borda_combo.currentIndex() == 0 else 'grade'
+        
+        # --- SALVA O VALOR DO CHECKBOX ---
+        self.tabela.centralizar_conteudo = self.centralizar_check.isChecked()
+        # -----------------------------------
         
         num_rows = self.table_widget.rowCount()
         num_cols = self.table_widget.columnCount()

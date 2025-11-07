@@ -30,7 +30,8 @@ from referencia import Livro, Artigo, Site
 from aba_conteudo import AbaConteudo
 from gerador_preview import GeradorHTMLPreview
 from gerenciador_projeto import GerenciadorProjetos
-from dialogs import ReferenciaDialog, DialogoFigura
+from dialogs import ReferenciaDialog
+from dialogo_figura import DialogoFigura
 from dialogo_brasao import DialogoBrasao
 from modelos_trabalho import get_estrutura_por_nome, get_nomes_modelos
 
