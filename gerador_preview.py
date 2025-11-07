@@ -7,13 +7,15 @@ import math
 from documento import DocumentoABNT, Capitulo
 
 # --- CONSTANTES DE ESTIMATIVA DE ALTURA (EM CM) ---
-ALTURA_CONTEUDO_PAGINA = 24.7
-ALTURA_LINHA_TEXTO = 0.6
+# --- CORREÇÃO FINAL: Reduzido de 24.7 para 24.0 para criar um "buffer" inferior. ---
+# Isso evita que o texto preencha a página até a borda.
+ALTURA_CONTEUDO_PAGINA = 24.0
+ALTURA_LINHA_TEXTO = 0.64 # (12pt / 72 * 2.54) * 1.5 = 0.635cm. Arredondado.
 ALTURA_TITULO_SECAO = 1.5
 ALTURA_LEGENDA = 1.2
 ALTURA_LINHA_TABELA = 0.8
 ALTURA_FORMULA_ESTIMADA = 4.0
-CARACTERES_POR_LINHA = 80
+CARACTERES_POR_LINHA = 70 # Estimativa pessimista
 
 class GeradorHTMLPreview:
     def __init__(self, doc_abnt: DocumentoABNT):
@@ -124,8 +126,6 @@ class GeradorHTMLPreview:
         if self.altura_restante < altura_necessaria: self._nova_pagina()
         
         self.conteudo_pagina_atual.append(html)
-        # --- CORREÇÃO FUNDAMENTAL DO BUG ---
-        # Subtrair a altura_necessaria (com o buffer), e não apenas a altura do elemento.
         self.altura_restante -= altura_necessaria
 
     def _adicionar_paragrafo_quebravel(self, texto_paragrafo):
@@ -145,7 +145,6 @@ class GeradorHTMLPreview:
             linhas_que_cabem = math.floor(self.altura_restante / ALTURA_LINHA_TEXTO)
             caracteres_que_cabem = linhas_que_cabem * CARACTERES_POR_LINHA
             
-            # Ajuste fino para o recuo da primeira linha
             if not is_continuacao:
                 caracteres_que_cabem -= 10 
 
@@ -196,7 +195,9 @@ class GeradorHTMLPreview:
                 width: 21cm; height: 29.7cm; padding: 3cm 2cm 2cm 3cm;
                 margin: 20px auto; background-color: white;
                 box-shadow: 0 0 10px rgba(0,0,0,0.2); box-sizing: border-box;
-                position: relative; overflow: hidden; line-height: 1.5;
+                position: relative; 
+                overflow: hidden; /* Isso esconde o texto que transborda */
+                line-height: 1.5;
             }
             .pagina.capa, .pagina.folha-rosto {
                 display: flex; flex-direction: column;
@@ -212,7 +213,12 @@ class GeradorHTMLPreview:
                 top: 1.5cm; right: 2cm; font-size: 12pt;
             }
             h1 { font-size: 12pt; font-weight: bold; text-transform: uppercase; margin-top: 1em; margin-bottom: 1em; }
-            p { margin: 0; padding: 0; overflow-wrap: break-word; word-wrap: break-word; }
+            p { 
+                margin: 0; padding: 0; 
+                overflow-wrap: break-word; /* Padrão */
+                word-wrap: break-word;     /* Compatibilidade */
+                word-break: break-all;     /* Força a quebra de palavras longas */
+            }
             p.corpo-texto { text-align: justify; text-indent: 1.25cm; }
             p.paragrafo-continuado { text-align: justify; text-indent: 0; }
             .paragrafo-quebrado { text-align-last: justify; }

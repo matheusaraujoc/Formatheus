@@ -1,5 +1,6 @@
 # gerador_docx.py
-# Descrição: Versão final com layout de 4 células para garantir a separação e adaptabilidade completas.
+# Descrição: Versão final com Capa e Folha de Rosto renderizadas
+# usando Parágrafos no corpo e o Rodapé da Seção para Cidade/Ano.
 
 import os
 import re
@@ -86,15 +87,41 @@ class GeradorDOCX:
         else:
             self._gerar_trabalho_academico(caminho_arquivo)
 
+    # --- FUNÇÃO ATUALIZADA (Controle de Seções) ---
     def _gerar_trabalho_academico(self, caminho_arquivo: str):
-        self._renderizar_capa()
-        self._renderizar_folha_rosto()
+        
+        # Seção 1: Capa (é a self.doc.sections[0])
+        self._renderizar_capa() 
+        
+        # Seção 2: Folha de Rosto
+        section_rosto = self.doc.add_section(WD_SECTION.NEW_PAGE)
+        # Desvincula o rodapé da Seção 2 (Folha de Rosto) da Seção 1 (Capa)
+        section_rosto.footer.is_linked_to_previous = False
+        self._renderizar_folha_rosto(section_rosto) # Passa a seção como argumento
+
+        # Seção 3: Resumo
+        section_resumo = self.doc.add_section(WD_SECTION.NEW_PAGE)
+        # Desvincula o rodapé da Seção 3 (Resumo)
+        section_resumo.footer.is_linked_to_previous = False
         self._renderizar_resumo()
-        section = self.doc.add_section(WD_SECTION.NEW_PAGE)
-        self._set_page_numbering(section)
+
+        # Seção 4: Conteúdo principal (onde a numeração começa)
+        section_main = self.doc.add_section(WD_SECTION.NEW_PAGE)
+        # Desvincula o rodapé da Seção 4 (Conteúdo)
+        section_main.footer.is_linked_to_previous = False
+        
+        # A numeração de página é aplicada APENAS na Seção 4
+        self._set_page_numbering(section_main) 
+        
         self._renderizar_sumario()
         self._renderizar_secoes_recursivamente(self.doc_abnt.estrutura_textual)
-        self.doc.add_section(WD_SECTION.NEW_PAGE)
+        
+        # Seção 5: Referências
+        section_refs = self.doc.add_section(WD_SECTION.NEW_PAGE)
+        # Mantém o cabeçalho/rodapé da seção anterior (com número de página)
+        section_refs.header.is_linked_to_previous = True
+        section_refs.footer.is_linked_to_previous = True
+        
         self._renderizar_referencias()
 
         self.doc.save(caminho_arquivo)
@@ -273,21 +300,15 @@ class GeradorDOCX:
         fldChar_end.set(qn('w:fldCharType'), 'end')
         run._r.append(fldChar_end)
 
+    # --- FUNÇÃO _renderizar_capa ATUALIZADA (SEM TABELA) ---
     def _renderizar_capa(self):
         cfg = self.doc_abnt.configuracoes
-        table = self.doc.add_table(rows=4, cols=1)
-        self._set_no_border_to_table(table)
-        table.autofit = False
-        table.allow_autofit = False
-        table.columns[0].width = Cm(16)
-
-        # Célula 1 (Topo): Instituição
-        cell_instituicao = table.cell(0, 0)
-        cell_instituicao.vertical_alignment = WD_ALIGN_VERTICAL.TOP
-
+        
+        # --- Conteúdo do Topo (Instituição/Brasão) ---
         if cfg.posicao_brasao == "Lados (Esquerdo e Direito)":
-            # Tabela aninhada para brasões
-            table_header = cell_instituicao.add_table(rows=1, cols=3)
+            # Se usar brasões lado a lado, AINDA precisamos de uma tabela,
+            # mas apenas para o cabeçalho.
+            table_header = self.doc.add_table(rows=1, cols=3)
             table_header.columns[0].width = Cm(3.5); table_header.columns[1].width = Cm(9.0); table_header.columns[2].width = Cm(3.5)
             self._set_no_border_to_table(table_header)
             cell_L, cell_C, cell_R = table_header.cell(0,0), table_header.cell(0,1), table_header.cell(0,2)
@@ -300,91 +321,72 @@ class GeradorDOCX:
                 p_r = cell_R.paragraphs[0]; p_r.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
                 p_r.add_run().add_picture(cfg.caminho_brasao_direito_processado, width=Cm(cfg.tamanho_brasao_direito_cm))
         else:
-            p_inst = cell_instituicao.paragraphs[0]
+            p_inst = self.doc.add_paragraph() 
             p_inst.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
             if cfg.posicao_brasao == "Acima do Nome" and cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
                 p_inst.add_run().add_picture(cfg.caminho_brasao_esquerdo_processado, width=Cm(cfg.tamanho_brasao_esquerdo_cm))
                 p_inst.add_run('\n')
             p_inst.add_run(cfg.instituicao.upper()).bold = True
 
-        # Célula 2: Autores
-        cell_autores = table.cell(1, 0)
-        cell_autores.vertical_alignment = WD_ALIGN_VERTICAL.BOTTOM # Alinha na base da célula
-
+        # --- Conteúdo dos Autores ---
         nomes_autores = '\n'.join([a.nome_completo.upper() for a in self.doc_abnt.autores])
-        p_autores = cell_autores.add_paragraph(nomes_autores)
-        p_autores.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        for run in p_autores.runs: run.bold = True
-
-        # Célula 3: Título
-        cell_titulo = table.cell(2, 0)
-        cell_titulo.vertical_alignment = WD_ALIGN_VERTICAL.TOP # Alinha no topo da célula
-
-        p_titulo = cell_titulo.add_paragraph()
-        p_titulo.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        run_titulo = p_titulo.add_run(self.doc_abnt.titulo.upper())
-        run_titulo.bold = True
-        run_titulo.font.size = self.regras.TAMANHO_FONTE_CAPA
-
-        # Célula 4 (Base): Cidade e Ano
-        cell_final = table.cell(3, 0)
-        cell_final.vertical_alignment = WD_ALIGN_VERTICAL.BOTTOM
-        
-        p_final = cell_final.paragraphs[0]
-        p_final.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        p_final.add_run(f"{cfg.cidade.upper()}\n{cfg.ano}")
-        
-        self.doc.add_page_break()
-
-    def _renderizar_folha_rosto(self):
-        cfg = self.doc_abnt.configuracoes
-        table = self.doc.add_table(rows=4, cols=1)
-        self._set_no_border_to_table(table)
-        table.autofit = False
-        table.allow_autofit = False
-        table.columns[0].width = Cm(16)
-
-        # Célula 1 (Topo): Autores
-        cell_autores = table.cell(0, 0)
-        cell_autores.vertical_alignment = WD_ALIGN_VERTICAL.TOP
-        
-        nomes_autores = '\n'.join([a.nome_completo.upper() for a in self.doc_abnt.autores])
-        p_autores = cell_autores.paragraphs[0]
+        p_autores = self.doc.add_paragraph() 
+        p_autores.paragraph_format.space_before = Pt(72)
         p_autores.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         p_autores.add_run(nomes_autores).bold = True
 
-        # Célula 2: Título
-        cell_titulo = table.cell(1, 0)
-        cell_titulo.vertical_alignment = WD_ALIGN_VERTICAL.BOTTOM
+        # --- Conteúdo do Título ---
+        p_titulo = self.doc.add_paragraph() 
+        p_titulo.paragraph_format.space_before = Pt(120)
+        p_titulo.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        run_titulo = p_titulo.add_run(self.doc_abnt.titulo.upper())
+        run_titulo.bold = True
+        run_titulo.font.size = self.regras.TAMANHO_FONTE_CAPA
+        
+        # --- Conteúdo da Base (Cidade/Ano) NO RODAPÉ ---
+        # Pega a primeira seção (a capa, que é a seção 0)
+        section = self.doc.sections[0]
+        footer = section.footer
+        p_final = footer.paragraphs[0]
+        p_final.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        p_final.add_run(f"{cfg.cidade.upper()}\n{cfg.ano}")
 
-        p_titulo = cell_titulo.add_paragraph()
+
+    # --- FUNÇÃO _renderizar_folha_rosto ATUALIZADA (SEM TABELA) ---
+    def _renderizar_folha_rosto(self, section):
+        cfg = self.doc_abnt.configuracoes
+        
+        # --- Conteúdo dos Autores ---
+        nomes_autores = '\n'.join([a.nome_completo.upper() for a in self.doc_abnt.autores])
+        p_autores = self.doc.add_paragraph()
+        p_autores.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        p_autores.add_run(nomes_autores).bold = True
+
+        # --- Conteúdo do Título ---
+        p_titulo = self.doc.add_paragraph()
+        p_titulo.paragraph_format.space_before = Pt(80)
         p_titulo.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         run_titulo = p_titulo.add_run(self.doc_abnt.titulo.upper())
         run_titulo.bold = True
         run_titulo.font.size = self.regras.TAMANHO_FONTE_CAPA
 
-        # Célula 3: Natureza do Trabalho
-        cell_natureza = table.cell(2, 0)
-        cell_natureza.vertical_alignment = WD_ALIGN_VERTICAL.TOP
-
-        p_natureza = cell_natureza.add_paragraph()
+        # --- Conteúdo da Natureza do Trabalho ---
+        p_natureza = self.doc.add_paragraph()
+        p_natureza.paragraph_format.space_before = Pt(90)
         texto_natureza = (f"{cfg.tipo_trabalho} apresentado ao curso de {cfg.modalidade_curso} em {cfg.curso} da {cfg.instituicao}, "
                             f"como requisito parcial para a obtenção do título de {cfg.titulo_pretendido}.")
         self.regras.aplicar_estilo_natureza_trabalho(p_natureza, texto_natureza)
         
-        p_orientador = cell_natureza.add_paragraph()
+        p_orientador = self.doc.add_paragraph()
         p_orientador.paragraph_format.space_before = Pt(12)
         self.regras.aplicar_estilo_natureza_trabalho(p_orientador, f"Orientador(a): {self.doc_abnt.orientador}")
 
-        # Célula 4 (Base): Cidade e Ano
-        cell_final = table.cell(3, 0)
-        cell_final.vertical_alignment = WD_ALIGN_VERTICAL.BOTTOM
-
-        p_final = cell_final.paragraphs[0]
+        # --- Conteúdo da Base (Cidade/Ano) NO RODAPÉ DA SEÇÃO 2 ---
+        footer = section.footer
+        p_final = footer.paragraphs[0]
         p_final.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         p_final.add_run(f"{cfg.cidade.upper()}\n{cfg.ano}")
-        
-        self.doc.add_page_break()
+
     
     def _renderizar_resumo(self):
         self.regras.aplicar_estilo_titulo_secao(self.doc, numero="", titulo_texto="RESUMO")
