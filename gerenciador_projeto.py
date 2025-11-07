@@ -10,7 +10,7 @@ import copy
 from PIL import Image
 
 from documento import (DocumentoABNT, Capitulo, Figura, Formula, Configuracoes,
-                       Autor, Tabela)
+                     Autor, Tabela)
 from referencia import Referencia, Livro, Artigo, Site
 import gerenciador_config
 
@@ -34,6 +34,10 @@ class GerenciadorProjetos:
         """
         Processa uma imagem de brasão: converte para PNG, redimensiona para um
         tamanho padrão e a salva na pasta de destino. Retorna o nome do novo arquivo.
+        
+        NOTA: Esta função é usada pelo código antigo de salvamento. A nova lógica de 
+        salvamento (abaixo) não a utiliza mais, pois a imagem já foi processada 
+        (cortada) pelo DialogoBrasao.
         """
         if not caminho_original or not os.path.exists(caminho_original):
             return None
@@ -71,21 +75,56 @@ class GerenciadorProjetos:
 
             doc_para_salvar = copy.deepcopy(documento)
 
-            # --- LÓGICA DE PROCESSAMENTO DO BRASÃO (COM NOMES CORRIGIDOS) ---
+            # --- CORREÇÃO: LÓGICA DE PROCESSAMENTO DO BRASÃO ---
+            #
+            # O problema anterior: O código estava usando o 'caminho_original'
+            # e reprocessando a imagem (sem o corte) usando a função _processar_imagem_brasao.
+            #
+            # A correção: Nós vamos usar o 'caminho_processado', que já 
+            # aponta para a imagem CORTADA (ex: '_brasoes_processados/img_1.png').
+            # Vamos apenas copiar esse arquivo para dentro do zip.
+            #
             cfg = doc_para_salvar.configuracoes
             
-            # CORREÇÃO 1: Usar os nomes corretos dos atributos (_original e _processado)
-            if cfg.caminho_brasao_esquerdo_original and os.path.exists(cfg.caminho_brasao_esquerdo_original):
-                novo_nome_arq = self._processar_imagem_brasao(cfg.caminho_brasao_esquerdo_original, brasoes_dir)
-                if novo_nome_arq:
-                    # Salva o caminho relativo do arquivo processado no JSON
-                    cfg.caminho_brasao_esquerdo_processado = os.path.join('brasoes', novo_nome_arq).replace('\\', '/')
+            # Processa o brasão esquerdo
+            # Verifica se o caminho da imagem JÁ PROCESSADA (cortada) existe
+            if cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
+                try:
+                    # Pega o nome do arquivo (ex: 'brasao_original_1.png')
+                    nome_arquivo_processado = os.path.basename(cfg.caminho_brasao_esquerdo_processado)
+                    # Define o destino dentro do zip (ex: temp_dir/brasoes/brasao_original_1.png)
+                    caminho_destino = os.path.join(brasoes_dir, nome_arquivo_processado)
+                    
+                    # Copia o arquivo JÁ CORTADO para o diretório temporário do zip
+                    shutil.copy2(cfg.caminho_brasao_esquerdo_processado, caminho_destino)
+                    
+                    # Atualiza o caminho no JSON para ser o caminho RELATIVO dentro do zip
+                    cfg.caminho_brasao_esquerdo_processado = os.path.join('brasoes', nome_arquivo_processado).replace('\\', '/')
+                    
+                except Exception as e:
+                    print(f"Erro ao copiar brasão esquerdo processado: {e}")
+                    cfg.caminho_brasao_esquerdo_processado = None # Falhou, anula o caminho
+            else:
+                 # Se o caminho processado não existir por algum motivo, zera ele
+                 cfg.caminho_brasao_esquerdo_processado = None
+
+            # Processa o brasão direito (mesma lógica)
+            if cfg.caminho_brasao_direito_processado and os.path.exists(cfg.caminho_brasao_direito_processado):
+                try:
+                    nome_arquivo_processado = os.path.basename(cfg.caminho_brasao_direito_processado)
+                    caminho_destino = os.path.join(brasoes_dir, nome_arquivo_processado)
+                    
+                    shutil.copy2(cfg.caminho_brasao_direito_processado, caminho_destino)
+                    
+                    cfg.caminho_brasao_direito_processado = os.path.join('brasoes', nome_arquivo_processado).replace('\\', '/')
+                    
+                except Exception as e:
+                    print(f"Erro ao copiar brasão direito processado: {e}")
+                    cfg.caminho_brasao_direito_processado = None
+            else:
+                cfg.caminho_brasao_direito_processado = None
             
-            if cfg.caminho_brasao_direito_original and os.path.exists(cfg.caminho_brasao_direito_original):
-                novo_nome_arq = self._processar_imagem_brasao(cfg.caminho_brasao_direito_original, brasoes_dir)
-                if novo_nome_arq:
-                    # Salva o caminho relativo do arquivo processado no JSON
-                    cfg.caminho_brasao_direito_processado = os.path.join('brasoes', novo_nome_arq).replace('\\', '/')
+            # --- FIM DA CORREÇÃO ---
 
             # Processa as figuras
             for figura in doc_para_salvar.banco_figuras:
@@ -142,6 +181,7 @@ class GerenciadorProjetos:
         cfg = documento_carregado.configuracoes
         
         # CORREÇÃO 2: Ao carregar, usar o caminho do arquivo processado, não o original
+        # (Seu código original já fazia isso corretamente, mantido como está)
         if cfg.caminho_brasao_esquerdo_processado:
             cfg.caminho_brasao_esquerdo_processado = os.path.join(self.diretorio_temporario_atual, cfg.caminho_brasao_esquerdo_processado.replace('/', os.path.sep))
         if cfg.caminho_brasao_direito_processado:

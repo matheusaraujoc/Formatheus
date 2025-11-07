@@ -4,6 +4,7 @@
 
 import sys
 import os
+import re
 
 os.environ['QTWEBENGINE_REMOTE_DEBUGGING'] = '9222'
 
@@ -254,7 +255,7 @@ class ABNTHelperApp(QWidget):
 
     @QtCore.Slot(str)
     def _atualizar_visibilidade_brasao(self, texto_selecionado):
-        if self._populando_ui: return
+        # A LINHA "if self._populando_ui: return" FOI REMOVIDA DAQUI.
         
         if texto_selecionado == "Nenhum":
             self.label_brasao_esquerdo.setVisible(False)
@@ -672,7 +673,42 @@ class ABNTHelperApp(QWidget):
         if not self.documento.titulo or not self.documento.autores:
             QMessageBox.warning(self, "Erro", "Título e Autores são campos obrigatórios.")
             return
-        filename, _ = QFileDialog.getSaveFileName(self, "Salvar Documento", "trabalho_abnt.docx", "Word Documents (*.docx)")
+        
+        # --- CORREÇÃO 1: NOME DO ARQUIVO ---
+        
+        titulo_projeto = self.documento.titulo
+        if titulo_projeto:
+            nome_sanitizado = re.sub(r'[<>:"/\\|?*]', '', titulo_projeto)
+            nome_sanitizado = nome_sanitizado[:60].strip()
+        else:
+            nome_sanitizado = ""
+
+        if not nome_sanitizado:
+            nome_sanitizado = "trabalho_abnt"
+            
+        nome_arquivo_sugerido = f"{nome_sanitizado}.docx"
+        
+        # --- CORREÇÃO 2: LOCAL DE SALVAMENTO ---
+        
+        # Define o diretório padrão (será usado se o projeto .abnf ainda não foi salvo)
+        diretorio_sugerido = "" 
+        
+        # Verifica se o projeto .abnf já foi salvo em algum lugar
+        if self.caminho_projeto_atual:
+            # Se sim, pega o diretório (pasta) onde o .abnf está
+            diretorio_sugerido = os.path.dirname(self.caminho_projeto_atual)
+            
+        # Combina o diretório sugerido com o nome de arquivo sugerido
+        # (ex: "C:/Meus Documentos/Projetos" + "Meu TCC.docx")
+        caminho_sugerido_completo = os.path.join(diretorio_sugerido, nome_arquivo_sugerido)
+        
+        # --- FIM DAS CORREÇÕES ---
+        
+        # Usa o caminho completo sugerido no diálogo
+        filename, _ = QFileDialog.getSaveFileName(self, "Salvar Documento", 
+                                                    caminho_sugerido_completo, 
+                                                    "Word Documents (*.docx)")
+        
         if not filename: return
         try:
             gerador = GeradorDOCX(self.documento)
