@@ -2,6 +2,8 @@
 # Descrição: Versão completa com integração do stylesheet
 # e chamada da função get_style_sheet() para carregar ícones.
 # Correção: Botão "Gerar Docx" movido para o canto do QTabWidget.
+# Correção (Bug Navegação): Adicionado slot _navegar_preview_para_ancora
+# e _on_editor_modificado para evitar recarregamento da preview.
 
 import sys
 import os
@@ -137,6 +139,12 @@ class ABNTHelperApp(QWidget):
 
         self.tabs = QTabWidget()
         self.aba_conteudo = AbaConteudo(self.documento)
+        
+        # --- INÍCIO DA CORREÇÃO (3/4) ---
+        # Conecta o novo sinal da aba_conteudo ao nosso novo slot de navegação
+        self.aba_conteudo.topicoSelecionadoParaNavegacao.connect(self._navegar_preview_para_ancora)
+        # --- FIM DA CORREÇÃO (3/4) ---
+        
         self.tabs.addTab(self._criar_aba_geral(), "Geral e Pré-Textual")
         self.tabs.addTab(self.aba_conteudo, "Conteúdo Textual (Estrutura)")
         self.tabs.addTab(self._criar_aba_referencias(), "Referências")
@@ -461,6 +469,32 @@ class ABNTHelperApp(QWidget):
     def _restaurar_scroll_preview(self):
         self.preview_display.page().runJavaScript(f"window.scrollTo(0, {self.scroll_posicao});")
 
+    # --- INÍCIO DA CORREÇÃO (1/4) ---
+    @QtCore.Slot(str)
+    def _navegar_preview_para_ancora(self, id_ancora: str):
+        """
+        Rola a pré-visualização (sem recarregar) para a âncora HTML.
+        """
+        if not id_ancora:
+            return
+            
+        # Se a preview estiver em outra aba, muda para ela
+        if self.modo_preview == "aba":
+            index_preview = self.tabs.indexOf(self.preview_container)
+            if index_preview != -1:
+                self.tabs.setCurrentIndex(index_preview)
+        
+        # Usa JavaScript para rolar suavemente até o elemento
+        # Isso é muito mais eficiente do que recarregar a URL
+        js_code = f"""
+        var element = document.getElementById('{id_ancora}');
+        if (element) {{
+            element.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+        }}
+        """
+        self.preview_display.page().runJavaScript(js_code)
+    # --- FIM DA CORREÇÃO (1/4) ---
+
     @QtCore.Slot()
     def _atualizar_preview(self):
         if self.modo_preview == "lado_a_lado":
@@ -612,6 +646,19 @@ class ABNTHelperApp(QWidget):
             self._salvar_projeto()
         return True
 
+    # --- INÍCIO DA CORREÇÃO (2/4) ---
+    @QtCore.Slot()
+    def _on_editor_modificado(self):
+        """
+        Slot intermediário que verifica se a mudança no editor foi
+        feita pelo usuário ou pelo carregamento de um capítulo.
+        """
+        # Só marca como modificado (e dispara a atualização)
+        # se não estivermos no meio de um carregamento de capítulo.
+        if not self.aba_conteudo._carregando_capitulo:
+            self._marcar_modificado()
+    # --- FIM DA CORREÇÃO (2/4) ---
+
     def _conectar_sinais_modificacao(self):
         self.cfg_tipo.currentTextChanged.connect(self._marcar_modificado)
         self.cfg_instituicao.textChanged.connect(self._marcar_modificado)
@@ -628,7 +675,13 @@ class ABNTHelperApp(QWidget):
         self.orientador_input.textChanged.connect(self._marcar_modificado)
         self.resumo_input.textChanged.connect(self._marcar_modificado)
         self.keywords_input.textChanged.connect(self._marcar_modificado)
-        self.aba_conteudo.editor_capitulo.textChanged.connect(self._marcar_modificado)
+
+        # --- INÍCIO DA CORREÇÃO (4/4) ---
+        # MUDANÇA: Em vez de conectar direto no _marcar_modificado,
+        # conectamos no nosso filtro _on_editor_modificado.
+        self.aba_conteudo.editor_capitulo.textChanged.connect(self._on_editor_modificado)
+        # --- FIM DA CORREÇÃO (4/4) ---
+        
         self.aba_conteudo.arvore_capitulos.estruturaAlterada.connect(self._marcar_modificado)
         self.aba_conteudo.arvore_capitulos.itemChanged.connect(self._marcar_modificado)
 
@@ -721,8 +774,8 @@ class ABNTHelperApp(QWidget):
         
         # Usa o caminho completo sugerido no diálogo
         filename, _ = QFileDialog.getSaveFileName(self, "Salvar Documento", 
-                                                   caminho_sugerido_completo, 
-                                                   "Word Documents (*.docx)")
+                                                  caminho_sugerido_completo, 
+                                                  "Word Documents (*.docx)")
         
         if not filename: return
         try:

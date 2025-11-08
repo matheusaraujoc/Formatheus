@@ -2,6 +2,8 @@
 # Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
 # para melhorar a usabilidade e o espaço de edição, incluindo Menu de Contexto
 # no editor para inserção rápida de ativos.
+# Correção (Bug Navegação): Adicionado sinal 'topicoSelecionadoParaNavegacao'
+# e método _get_item_numero_completo.
 
 import re
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -54,6 +56,12 @@ class ArvoreConteudo(QTreeWidget):
 
 # --- CLASSE ABA CONTEUDO ---
 class AbaConteudo(QWidget):
+    # --- INÍCIO DA CORREÇÃO (1/3) ---
+    # SINAL: Emitido quando um tópico é selecionado,
+    # enviando o ID da âncora HTML (ex: "secao-1-1")
+    topicoSelecionadoParaNavegacao = QtCore.Signal(str)
+    # --- FIM DA CORREÇÃO (1/3) ---
+
     def __init__(self, documento, parent=None):
         super().__init__(parent)
         self.documento = documento
@@ -392,10 +400,58 @@ class AbaConteudo(QWidget):
         self._salvar_conteudo_capitulo()
         self.atualizar_bancos_visuais()
 
+    # --- INÍCIO DA CORREÇÃO (2/3) ---
+    def _get_item_numero_completo(self, item: QTreeWidgetItem) -> str:
+        """
+        Calcula o número completo do item (ex: "1.2.3")
+        baseado na sua posição na árvore.
+        """
+        path_parts = []
+        current = item
+        
+        # O invisibleRootItem é o "pai" de todos os itens de nível superior
+        while current and current is not self.arvore_capitulos.invisibleRootItem():
+            parent = current.parent()
+            index = -1
+            
+            if parent:
+                # É um filho, pega o índice em relação ao pai
+                index = parent.indexOfChild(current)
+            else:
+                # É um item de nível superior
+                index = self.arvore_capitulos.indexOfTopLevelItem(current)
+                
+            if index != -1:
+                path_parts.append(str(index + 1))
+            else:
+                break # Item não encontrado (não deve acontecer)
+            
+            current = parent
+            
+        # A lista é construída de filho para pai (ex: ["3", "2", "1"]),
+        # então invertemos para ter a ordem correta (ex: "1.2.3").
+        return ".".join(reversed(path_parts))
+    # --- FIM DA CORREÇÃO (2/3) ---
+
     @QtCore.Slot(QTreeWidgetItem, QTreeWidgetItem)
     def _on_capitulo_selecionado_changed(self, item_atual, item_anterior):
         self._carregar_capitulo_no_editor(item_atual, item_anterior)
         self.atualizar_bancos_visuais()
+
+        # --- INÍCIO DA CORREÇÃO (3/3) ---
+        if item_atual:
+            try:
+                # Calcula o número (ex: "1.2")
+                numero_completo = self._get_item_numero_completo(item_atual)
+                if numero_completo:
+                    # Gera o ID da âncora (ex: "secao-1-2")
+                    id_ancora = f"secao-{numero_completo.replace('.', '-')}"
+                    # Emite o sinal para o main_app.py
+                    self.topicoSelecionadoParaNavegacao.emit(id_ancora)
+            except Exception as e:
+                # É bom ter um print caso algo dê errado
+                print(f"Erro ao gerar âncora para navegação: {e}")
+        # --- FIM DA CORREÇÃO (3/3) ---
 
     @QtCore.Slot(str)
     def _filtrar_arvore(self, texto_busca):
