@@ -1,12 +1,13 @@
 # aba_conteudo.py
-# Descrição: Versão completa com QTabWidget e propriedades QSS
-# para o novo stylesheet.
+# Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
+# para melhorar a usabilidade e o espaço de edição.
 
 import re
 from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtWidgets import (QWidget, QLabel, QTextEdit, QPushButton, QListWidget, QCheckBox,
                                QVBoxLayout, QHBoxLayout, QMessageBox, QTreeWidget,
-                               QTreeWidgetItem, QInputDialog, QAbstractItemView, QLineEdit, QTabWidget)
+                               QTreeWidgetItem, QInputDialog, QAbstractItemView, QLineEdit, QTabWidget,
+                               QSplitter) # <-- 1. Importar QSplitter
 
 from documento import Capitulo, Tabela, Figura, Formula
 from dialogo_tabela import TabelaDialog
@@ -37,12 +38,19 @@ class AbaConteudo(QWidget):
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_panel.setMaximumWidth(350)
+        layout.setContentsMargins(10, 10, 10, 10) # Adiciona uma margem
+        
+        # --- INÍCIO DA MUDANÇA: O painel esquerdo agora é um Splitter ---
+        
+        left_splitter = QSplitter(QtCore.Qt.Orientation.Vertical)
+        left_splitter.setMaximumWidth(350) # O painel esquerdo todo continua fino
 
+        # --- 1. PAINEL DO TOPO-ESQUERDO (Árvore de Capítulos) ---
+        top_left_widget = QWidget()
+        left_layout = QVBoxLayout(top_left_widget)
+        
         label_estrutura = QLabel("Estrutura do Documento")
-        label_estrutura.setProperty("cssClass", "titulo") # Aplica estilo
+        label_estrutura.setProperty("cssClass", "titulo")
         left_layout.addWidget(label_estrutura)
         
         self.busca_arvore_input = QLineEdit()
@@ -76,21 +84,17 @@ class AbaConteudo(QWidget):
         btn_add_sub.clicked.connect(self._adicionar_subtopico)
         btn_del.clicked.connect(self._remover_topico)
         left_layout.addLayout(btn_layout)
-        layout.addWidget(left_panel)
-
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        self.label_capitulo_atual = QLabel("Selecione um tópico para editar")
-        self.label_capitulo_atual.setProperty("cssClass", "titulo")
         
-        self.editor_capitulo = QTextEdit()
-        self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
+        # Adiciona o painel da árvore ao splitter
+        left_splitter.addWidget(top_left_widget) 
+        
+        # --- 2. PAINEL DA BASE-ESQUERDA (Bancos de Ativos) ---
+        # (Toda a lógica do QTabWidget foi movida para cá)
         
         self.lista_tabelas = QListWidget()
         self.lista_figuras = QListWidget()
         self.lista_formulas = QListWidget()
 
-        # Cria o QTabWidget que vai conter os bancos
         self.bancos_tabs = QTabWidget()
 
         # Cria o widget para a aba "Tabelas"
@@ -182,7 +186,25 @@ class AbaConteudo(QWidget):
         self.bancos_tabs.addTab(figuras_widget, "Figuras")
         self.bancos_tabs.addTab(formulas_widget, "Fórmulas")
 
-        # --- INÍCIO DA CORREÇÃO: Adiciona Toolbar de Formatação ---
+        # Adiciona o painel de bancos ao splitter
+        left_splitter.addWidget(self.bancos_tabs)
+        
+        # Define os tamanhos iniciais (ex: 60% para a árvore, 40% para os bancos)
+        left_splitter.setSizes([400, 300]) 
+        
+        # Adiciona o splitter (painel esquerdo) ao layout principal
+        layout.addWidget(left_splitter)
+
+        # --- FIM DA MUDANÇA ---
+
+
+        # --- 3. PAINEL DIREITO (Editor de Texto) ---
+        # (Agora muito mais simples, só tem o editor)
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        
+        self.label_capitulo_atual = QLabel("Selecione um tópico para editar")
+        self.label_capitulo_atual.setProperty("cssClass", "titulo")
         
         format_toolbar = QHBoxLayout()
         format_toolbar.addWidget(QLabel("Formatação:"))
@@ -199,15 +221,19 @@ class AbaConteudo(QWidget):
         
         format_toolbar.addStretch()
         
-        # --- FIM DA CORREÇÃO ---
+        self.editor_capitulo = QTextEdit()
+        self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
 
-        # Adiciona os widgets ao layout principal com as novas proporções
         right_layout.addWidget(self.label_capitulo_atual)
-        right_layout.addLayout(format_toolbar) # Adiciona a nova toolbar
-        right_layout.addWidget(self.editor_capitulo, 3) # Editor de texto
-        right_layout.addWidget(self.bancos_tabs, 2)     # Abas 
-        layout.addWidget(right_panel)
+        right_layout.addLayout(format_toolbar)
+        right_layout.addWidget(self.editor_capitulo, 1) # O '1' faz ele tomar todo o espaço
         
+        # Adiciona o painel direito ao layout principal
+        # O '1' aqui faz com que o painel direito seja maior que o esquerdo
+        layout.addWidget(right_panel, 1) 
+        
+        # --- Fim do Bloco do Painel Direito ---
+
         self._popular_arvore()
         if self.arvore_capitulos.topLevelItemCount() > 0:
             self.arvore_capitulos.setCurrentItem(self.arvore_capitulos.topLevelItem(0))

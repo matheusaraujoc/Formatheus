@@ -1,5 +1,5 @@
 # stylesheet.py
-# Descrição: Folha de estilo QSS global para o ABNT Helper.
+# Descrição: Folha de estilo QSS global para o Formatheus.
 # Versão 3.7: Corrige o "ValueError: Single '}' encountered..."
 # escapando todos os colchetes literais do QSS (ex: {{, }}).
 

@@ -1,6 +1,7 @@
 # main_app.py
 # Descrição: Versão completa com integração do stylesheet
 # e chamada da função get_style_sheet() para carregar ícones.
+# Correção: Botão "Gerar Docx" movido para o canto do QTabWidget.
 
 import sys
 import os
@@ -45,7 +46,7 @@ from dialogs import DialogoRecuperacao
 class ABNTHelperApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('ABNT Helper Final')
+        self.setWindowTitle('Formatheus')
         self.setGeometry(100, 100, 1400, 800)
 
         self.config = gerenciador_config.carregar_config()
@@ -141,10 +142,23 @@ class ABNTHelperApp(QWidget):
         self.tabs.addTab(self._criar_aba_referencias(), "Referências")
         self.preview_container = self._criar_painel_preview()
 
-        self.generate_btn = QPushButton("Gerar Documento .docx Final")
-        self.generate_btn.setObjectName("GenerateBtn")
+        # --- INÍCIO DA CORREÇÃO ---
+        # 1. Criamos o botão mais discreto
+        self.generate_btn = QPushButton("Gerar .docx")
+        self.generate_btn.setToolTip("Gerar o documento .docx final")
+        # Adiciona um ícone padrão de "salvar/exportar"
+        self.generate_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DialogSaveButton))
+        
+        # NÃO definimos o setObjectName("GenerateBtn") para que ele use o estilo padrão (discreto)
+        
         self.generate_btn.clicked.connect(self._gerar_documento_final)
-        self.main_layout.addWidget(self.generate_btn) 
+        
+        # 2. Adicionamos o botão ao canto superior direito do QTabWidget
+        self.tabs.setCornerWidget(self.generate_btn, QtCore.Qt.Corner.TopRightCorner)
+
+        # 3. REMOVEMOS a linha que adicionava o botão ao layout principal
+        # self.main_layout.addWidget(self.generate_btn) # <--- LINHA REMOVIDA
+        # --- FIM DA CORREÇÃO ---
 
         self._reconfigurar_layout() 
 
@@ -530,7 +544,7 @@ class ABNTHelperApp(QWidget):
         try:
             self.gerenciador_projeto.salvar_projeto(self.documento, self.caminho_projeto_atual)
             self.modificado = False
-            self.setWindowTitle(f'ABNT Helper Final - {os.path.basename(self.caminho_projeto_atual)}')
+            self.setWindowTitle(f'Formatheus - {os.path.basename(self.caminho_projeto_atual)}')
             QMessageBox.information(self, "Sucesso", "Projeto salvo com sucesso!")
             print("Trabalho salvo manualmente. Timer de recuperação pausado.")
             self.autosave_timer.stop()
@@ -707,8 +721,8 @@ class ABNTHelperApp(QWidget):
         
         # Usa o caminho completo sugerido no diálogo
         filename, _ = QFileDialog.getSaveFileName(self, "Salvar Documento", 
-                                                    caminho_sugerido_completo, 
-                                                    "Word Documents (*.docx)")
+                                                   caminho_sugerido_completo, 
+                                                   "Word Documents (*.docx)")
         
         if not filename: return
         try:
@@ -736,14 +750,14 @@ class ABNTHelperApp(QWidget):
             if is_recovery:
                 self.caminho_projeto_atual = None
                 self.modificado = True
-                self.setWindowTitle(f'ABNT Helper Final - ARQUIVO RECUPERADO*')
+                self.setWindowTitle(f'Formatheus - ARQUIVO RECUPERADO*')
                 QMessageBox.information(self, "Arquivo Recuperado", "O arquivo foi recuperado com sucesso.\nUse 'Salvar Como...' para salvá-lo em um local permanente.")
                 gerenciador_recuperacao.limpar_recuperacao_pelo_caminho_direto(caminho)
                 self._marcar_modificado()
             else:
                 self.caminho_projeto_atual = caminho
                 self.modificado = False
-                self.setWindowTitle(f'ABNT Helper Final - {os.path.basename(caminho)}')
+                self.setWindowTitle(f'Formatheus - {os.path.basename(caminho)}')
                 gerenciador_config.add_projeto_recente(caminho)
                 gerenciador_recuperacao.limpar_recuperacao(caminho)
         except Exception as e:
@@ -752,22 +766,36 @@ class ABNTHelperApp(QWidget):
 
     def iniciar_novo_projeto_com_modelo(self, nome_modelo):
         if not self._verificar_alteracoes_nao_salvas(): return
+        
+        # Limpa o estado antigo
         gerenciador_recuperacao.limpar_recuperacao(self.caminho_projeto_atual)
         if self.autosave_timer.isActive(): self.autosave_timer.stop()
+        
         self.documento = DocumentoABNT()
-        estrutura = get_estrutura_por_nome(nome_modelo)
-        for titulo in estrutura:
-            self.documento.estrutura_textual.adicionar_filho(Capitulo(titulo=titulo, is_template_item=True))
+        
+        # --- INÍCIO DA CORREÇÃO ---
+        # Pega a nova estrutura (lista de dicionários)
+        estrutura_data_list = get_estrutura_por_nome(nome_modelo)
+        
+        # Usa a função Capitulo.from_dict (que já existe em documento.py)
+        # para construir recursivamente os capítulos e seus filhos.
+        for capitulo_data in estrutura_data_list:
+            novo_capitulo = Capitulo.from_dict(capitulo_data) 
+            self.documento.estrutura_textual.adicionar_filho(novo_capitulo)
+        # --- FIM DA CORREÇÃO ---
+
         self.caminho_projeto_atual = None
         self.gerenciador_projeto.fechar_projeto()
+        
         if hasattr(self, 'cfg_tipo'):
             self._popular_ui_com_documento()
             self._populando_ui = True
             self.cfg_tipo.setCurrentText(nome_modelo)
             self.documento.configuracoes.tipo_trabalho = nome_modelo
             self._populando_ui = False
+            
         self.modificado = False
-        self.setWindowTitle(f'ABNT Helper Final - Novo Projeto ({nome_modelo})')
+        self.setWindowTitle(f'Formatheus - Novo Projeto ({nome_modelo})')
         self._disparar_atualizacao_automatica()
 
 

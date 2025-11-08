@@ -41,7 +41,7 @@ class ProjetoRecenteItem(QWidget):
 class TelaInicial(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Bem-vindo ao ABNT Helper")
+        self.setWindowTitle("Bem-vindo ao Formatheus")
         self.setMinimumSize(950, 550)
         
         # O stylesheet principal é aplicado no main_app.py
@@ -71,7 +71,7 @@ class TelaInicial(QDialog):
         left_layout = QVBoxLayout(left_panel)
         left_panel.setFixedWidth(250)
 
-        titulo_label = QLabel("ABNT Helper")
+        titulo_label = QLabel("Formatheus")
         titulo_label.setFont(QtGui.QFont("Segoe UI", 24, QtGui.QFont.Weight.Bold))
         
         btn_novo = QPushButton("Novo Projeto")

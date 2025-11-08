@@ -1,8 +1,8 @@
-# Documentação de Arquitetura: ABNT Helper
+# Documentação de Arquitetura: Formatheus
 
 ## 1. Visão Geral da Aplicação
 
-O **ABNT Helper** é uma aplicação desktop híbrida, construída em Python (com PySide6), projetada para ser um assistente completo na criação de trabalhos acadêmicos (TCCs, Artigos, etc.) formatados segundo as normas ABNT.
+O **Formatheus** é uma aplicação desktop híbrida, construída em Python (com PySide6), projetada para ser um assistente completo na criação de trabalhos acadêmicos (TCCs, Artigos, etc.) formatados segundo as normas ABNT.
 
 O programa gerencia todo o ciclo de vida do documento, desde a estruturação de capítulos, passando pela edição de texto, gerenciamento de ativos (figuras, tabelas, fórmulas), até a geração de dois produtos finais:
 
@@ -13,7 +13,7 @@ O programa gerencia todo o ciclo de vida do documento, desde a estruturação de
 
 ## 2. Arquitetura Tecnológica (Stack)
 
-A aplicação utiliza uma combinação inteligente de tecnologias para atingir seus objetivos:
+A aplicação utiliza uma combinação de tecnologias para atingir seus objetivos:
 
 * **Interface Gráfica (GUI):** `PySide6` (Qt for Python).
 * **Geração de Documento (Backend):** `python-docx` (para criar o `.docx`).
@@ -1779,3 +1779,250 @@ Esta função verifica se um arquivo recente ainda existe (`if os.path.exists(ca
 
   * **Cenário:** O usuário abre um projeto, depois o exclui no Windows Explorer.
   * **Resultado:** Se o usuário clicar no item "morto", o programa não trava. Em vez disso, ele mostra um `QMessageBox` informando o erro, chama `gerenciador_config.remover_projeto_recente()` para limpar a entrada inválida da lista, e então atualiza a UI (`self.popular_projetos_recentes()`). Este é um fluxo de tratamento de erro muito robusto e profissional.
+
+
+Aqui está um título e uma breve descrição para o documento de levantamento de requisitos que acabamos de criar:
+
+---
+
+# Levantamento de Requisitos: Formatheus
+
+**Descrição:** Este documento detalha os Requisitos Funcionais (RF) e os Requisitos Não Funcionais (RNF) da aplicação Formatheus. O objetivo é fornecer uma análise completa das funcionalidades do sistema (o que ele faz) e de suas qualidades e restrições operacionais (como ele faz), servindo como guia para o desenvolvimento, validação e testes do software.
+
+Esta documentação descreve o que o sistema *faz* (funcionais) e quais são suas *qualidades* e *restrições* (não funcionais).
+
+---
+
+## 1. Requisitos Funcionais (RF)
+
+Os Requisitos Funcionais descrevem as **ações e funcionalidades** que o sistema deve ser capaz de executar. Eles são as *features* vistas pelo usuário.
+
+### RF-01: Gerenciamento de Projeto
+| ID | Requisito | Descrição | Módulo(s) Responsável(is) |
+| :--- | :--- | :--- | :--- |
+| RF-001 | Iniciar Novo Projeto | O usuário deverá ser capaz de iniciar um novo projeto a partir de uma seleção de modelos (ex: TCC, Artigo). | `tela_inicial.py`, `main_app.py`, `modelos_trabalho.py` |
+| RF-002 | Carregar Projeto | O usuário deverá ser capaz de carregar um projeto existente a partir de um arquivo `.abnf`. | `tela_inicial.py`, `main_app.py`, `gerenciador_projeto.py` |
+| RF-003 | Salvar Projeto | O usuário deverá ser capaz de salvar o estado atual do seu trabalho no arquivo `.abnf` associado. | `main_app.py`, `gerenciador_projeto.py` |
+| RF-004 | Salvar Como | O usuário deverá ser capaz de salvar o projeto atual em um novo arquivo `.abnf`. | `main_app.py` |
+| RF-005 | Listar Projetos Recentes | O sistema deverá exibir uma lista de projetos abertos recentemente na tela inicial para acesso rápido. | `tela_inicial.py`, `gerenciador_config.py` |
+| RF-006 | Validar Caminho Recente | O sistema deverá verificar se um projeto recente ainda existe no disco antes de tentar abri-lo. | `tela_inicial.py` |
+
+### RF-02: Configuração do Documento
+| ID | Requisito | Descrição | Módulo(s) Responsável(is) |
+| :--- | :--- | :--- | :--- |
+| RF-007 | Definir Metadados | O usuário deverá ser capaz de definir os dados pré-textuais do documento (Título, Autores, Instituição, Curso, etc.). | `main_app.py` (`_criar_aba_geral`), `documento.py` |
+| RF-008 | Mudar Tipo de Trabalho | O usuário deverá ser capaz de alterar o "Tipo de Trabalho" (ex: TCC para Artigo) a qualquer momento, e o sistema deverá reestruturar os capítulos. | `main_app.py` (`_on_template_selecionado`) |
+| RF-009 | Configurar Brasão | O usuário deverá ser capaz de selecionar uma imagem de brasão para a capa. | `main_app.py`, `dialogo_brasao.py` |
+| RF-010 | Definir Posição do Brasão | O usuário deverá ser capaz de definir a posição do brasão (Nenhum, Acima, Lados, Apenas Esquerdo/Direito). | `main_app.py` |
+| RF-011 | Cortar Brasão (Retangular) | O usuário deverá ser capaz de aplicar um corte retangular na imagem do brasão. | `dialogo_brasao.py` (`CropLabel`) |
+| RF-012 | Cortar Brasão (Poligonal) | O usuário deverá ser capaz de aplicar um corte poligonal (à mão livre) na imagem do brasão. | `dialogo_brasao.py` (`CropLabel`) |
+
+### RF-03: Edição de Conteúdo e Estrutura
+| ID | Requisito | Descrição | Módulo(s) Responsável(is) |
+| :--- | :--- | :--- | :--- |
+| RF-013 | Criar Capítulos | O usuário deverá ser capaz de adicionar novos capítulos (tópicos) e sub-capítulos (subtópicos). | `aba_conteudo.py` |
+| RF-014 | Editar Conteúdo Textual | O usuário deverá ser capaz de digitar e editar o texto (conteúdo) do capítulo selecionado. | `aba_conteudo.py` (`QTextEdit`) |
+| RF-015 | Renomear Capítulos | O usuário deverá ser capaz de renomear capítulos diretamente na árvore de estrutura. | `aba_conteudo.py` |
+| RF-016 | Reordenar Capítulos | O usuário deverá ser capaz de reordenar capítulos e sub-capítulos usando "Arrastar e Soltar" (Drag-and-Drop). | `aba_conteudo.py` (`ArvoreConteudo`) |
+| RF-017 | Remover Capítulos | O usuário deverá ser capaz de remover um capítulo (e todos os seus sub-capítulos). | `aba_conteudo.py` |
+| RF-018 | Inserir Quebra de Página | O usuário deverá ser capaz de inserir um marcador `{{QUEBRA_PAGINA}}` no texto. | `aba_conteudo.py` |
+| RF-019 | Inserir Página em Branco | O usuário deverá ser capaz de inserir um marcador `{{PAGINA_EM_BRANCO}}` no texto. | `aba_conteudo.py` |
+| RF-020 | Filtrar Estrutura | O usuário deverá ser capaz de filtrar a árvore de capítulos por título ou conteúdo. | `aba_conteudo.py` (`_filtrar_arvore`) |
+
+### RF-04: Gerenciamento de Ativos (Tabelas, Figuras, Fórmulas)
+| ID | Requisito | Descrição | Módulo(s) Responsável(is) |
+| :--- | :--- | :--- | :--- |
+| RF-021 | Criar/Editar Tabela | O usuário deverá ser capaz de criar e editar tabelas, definindo título, fonte, estilo de borda e centralização. | `aba_conteudo.py`, `dialogo_tabela.py` |
+| RF-022 | Criar/Editar Figura | O usuário deverá ser capaz de carregar e editar figuras, definindo título, fonte e largura no documento. | `aba_conteudo.py`, `dialogo_figura.py` |
+| RF-023 | Cortar Figura | O usuário deverá ser capaz de aplicar cortes (retangular e poligonal) nas figuras. | `dialogo_figura.py` (`CropLabel`) |
+| RF-024 | Criar/Editar Fórmula | O usuário deverá ser capaz de criar e editar fórmulas usando um editor LaTeX com preview em tempo real (MathJax). | `aba_conteudo.py`, `DialogoFormula.py`, `latex_renderer.html` |
+| RF-025 | Inserir Marcadores de Ativos | O usuário deverá ser capaz de inserir marcadores (placeholders) para tabelas, figuras e fórmulas no texto. | `aba_conteudo.py` |
+| RF-026 | Filtrar Ativos | O usuário deverá ser capaz de filtrar as listas de ativos para mostrar todos ou apenas os usados no capítulo atual. | `aba_conteudo.py` (`atualizar_bancos_visuais`) |
+
+### RF-05: Gerenciamento de Referências
+| ID | Requisito | Descrição | Módulo(s) Responsável(is) |
+| :--- | :--- | :--- | :--- |
+| RF-027 | Adicionar Referência | O usuário deverá ser capaz de adicionar referências dos tipos "Livro", "Artigo" e "Site". | `main_app.py`, `dialogs.py` (`ReferenciaDialog`) |
+| RF-028 | Formulário Dinâmico | A janela de referências deverá exibir campos de entrada diferentes com base no tipo selecionado. | `dialogs.py` (`update_form_visibility`) |
+| RF-029 | Editar Referência | O usuário deverá ser capaz de editar uma referência existente. | `main_app.py` |
+| RF-030 | Remover Referência | O usuário deverá ser capaz de remover uma referência existente. | `main_app.py` |
+
+### RF-06: Geração de Saída (Preview e DOCX)
+| ID | Requisito | Descrição | Módulo(s) Responsável(is) |
+| :--- | :--- | :--- | :--- |
+| RF-031 | Gerar Documento `.docx` | O sistema deverá gerar um arquivo `.docx` final com base em todos os dados e regras. | `main_app.py`, `gerador_docx.py` |
+| RF-032 | Renderizar Capa e Folha de Rosto | O `.docx` deverá conter a capa e a folha de rosto formatadas com os metadados e brasões. | `gerador_docx.py`, `normas_abnt.py` |
+| RF-033 | Renderizar Sumário (TOC) | O `.docx` deverá conter um sumário funcional com números de página corretos. | `gerador_docx.py` (`_atualizar_sumario_com_word`) |
+| RF-034 | Renderizar Capítulos (DOCX) | O `.docx` deverá renderizar todos os capítulos e subcapítulos com numeração e estilos ABNT. | `gerador_docx.py` |
+| RF-035 | Quebra de Página de Capítulo | O `.docx` deverá iniciar cada capítulo de Nível 1 (1, 2, 3...) em uma nova página. | `gerador_docx.py` |
+| RF-036 | Renderizar Ativos (DOCX) | O `.docx` deverá substituir os marcadores por tabelas, figuras (PNG) e fórmulas (PNG) renderizadas. | `gerador_docx.py` |
+| RF-037 | Renderizar Referências (DOCX) | O `.docx` deverá renderizar a lista de referências em ordem alfabética no final do documento. | `gerador_docx.py`, `referencia.py` |
+| RF-038 | Gerar Pré-visualização (HTML) | O sistema deverá exibir uma pré-visualização em HTML que simule o documento final. | `main_app.py`, `gerador_preview.py` |
+| RF-039 | Simular Paginação (HTML) | O preview deverá simular as páginas A4 (21x29.7cm) e as margens ABNT (3/2/3/2 cm) usando CSS. | `gerador_preview.py` |
+| RF-040 | Simular Quebras (HTML) | O preview deverá simular quebras de página para capítulos de Nível 1 e comandos manuais (`{{QUEBRA_PAGINA}}`). | `gerador_preview.py` |
+| RF-041 | Simular Sumário (HTML) | O preview deverá gerar um sumário com números de página *estimados* e links de âncora clicáveis. | `gerador_preview.py` |
+
+### RF-07: Segurança e Recuperação
+| ID | Requisito | Descrição | Módulo(s) Responsável(is) |
+| :--- | :--- | :--- | :--- |
+| RF-042 | Auto-Save (Recuperação) | O sistema deverá salvar automaticamente o trabalho do usuário em um arquivo de recuperação (`.abnf.recovery`) em intervalos definidos. | `main_app.py` (`autosave_timer`), `gerenciador_recuperacao.py` |
+| RF-043 | Restaurar Sessão | O sistema deverá detectar arquivos de recuperação ao iniciar e oferecer ao usuário a opção de restaurá-los ou descartá-los. | `main_app.py`, `dialogs.py` (`DialogoRecuperacao`) |
+| RF-044 | Backup (Versão) | O sistema deverá, a cada salvamento manual, criar um backup (`.abnf.bak`) da versão anterior do arquivo. | `main_app.py`, `gerenciador_recuperacao.py` |
+| RF-045 | Limpeza de Backups | O sistema deverá manter apenas um número máximo de backups (ex: 10), excluindo os mais antigos. | `gerenciador_recuperacao.py` (`_limpar_backups_antigos`) |
+
+---
+
+## 2. Requisitos Não Funcionais (RNF)
+
+Os Requisitos Não Funcionais descrevem as **qualidades, restrições e padrões operacionais** do sistema. Eles definem *como* o sistema deve ser, em vez de *o que* ele deve fazer.
+
+### RNF-01: Usabilidade e Interface
+| ID | Requisito | Descrição |
+| :--- | :--- | :--- |
+| RNF-001 | Intuitividade | A interface deve ser intuitiva para usuários com conhecimento das normas ABNT, mas não necessariamente com conhecimento técnico avançado. |
+| RNF-002 | Feedback Visual | O sistema deve fornecer feedback claro para ações do usuário (ex: `*` no título ao modificar, cursor de espera ao salvar). |
+| RNF-003 | Confirmação Destrutiva | O sistema deve exigir confirmação do usuário antes de ações destrutivas (ex: "Remover Tópico?", "Descartar Recuperação?"). |
+| RNF-004 | Idioma | A interface do usuário, incluindo mensagens de erro e instruções, deve ser primariamente em Português (pt-BR). |
+
+### RNF-02: Desempenho
+| ID | Requisito | Descrição |
+| :--- | :--- | :--- |
+| RNF-005 | Fluidez de Edição | A digitação no editor de texto (`QTextEdit`) deve permanecer 100% fluida, sem "gaguejar", independentemente do tamanho do documento. (Conseguido via `textChanged` salvando apenas em memória). |
+| RNF-006 | Atualização de Preview (Debounce) | A pré-visualização (uma operação "pesada") não deve ser executada a cada tecla. Ela deve ser executada após um "debounce" (atraso) de 750ms após o usuário parar de digitar. |
+| RNF-007 | Atualização de Preview (Não-Bloqueante) | A geração do preview não deve travar a interface do usuário. (Conseguido pelo `QTimer`). |
+| RNF-008 | Medição de Texto (Preview) | A simulação de paginação do preview deve ser precisa, medindo a largura real das palavras (via `Pillow`) em vez de "adivinhar" (via `CARACTERES_POR_LINHA`). |
+
+### RNF-03: Confiabilidade e Robustez
+| ID | Requisito | Descrição |
+| :--- | :--- | :--- |
+| RNF-009 | Proteção contra Perda de Dados | O sistema não deve perder o trabalho do usuário em caso de travamento do aplicativo ou desligamento do SO. (Conseguido pelo Auto-Save em `%LOCALAPPDATA%`). |
+| RNF-010 | Proteção contra Erro Humano | O sistema deve proteger o usuário de salvar alterações indesejadas, fornecendo backups automáticos (`.abnf.bak`) a cada salvamento manual. |
+| RNF-011 | Portabilidade de Projeto | O formato de arquivo `.abnf` (Zip) deve ser 100% portátil. Um usuário deve poder mover um único arquivo para outro computador (com o Formatheus) e abri-lo com todas as imagens, fórmulas e dados intactos. (Conseguido via `gerenciador_projeto.py` usando caminhos relativos). |
+| RNF-012 | Tratamento de Erro de Arquivo | O sistema deve lidar graciosamente com arquivos ausentes (ex: fontes não encontradas, imagens deletadas, projetos recentes movidos) sem travar, exibindo mensagens de erro informativas. |
+
+### RNF-04: Restrições de Implementação e "Gambiarras"
+| ID | Requisito | Descrição |
+| :--- | :--- | :--- |
+| RNF-013 | **Restrição (Windows): Sumário** | A funcionalidade de atualização automática do Sumário (`_atualizar_sumario_com_word`) é **dependente do Windows** e **requer o Microsoft Word** instalado (via `pywin32`). Em outros sistemas, o sumário será gerado sem números de página. |
+| RNF-014 | **Restrição (Windows): Fonte do Preview** | A medição exata de texto no `gerador_preview.py` é **dependente do Windows**, pois assume que a fonte `times.ttf` está localizada em `C:/Windows/Fonts/`. Falhará no macOS/Linux. |
+| RNF-015 | Restrição (Dependência Web) | A renderização de fórmulas (`DialogoFormula`) depende de uma conexão de internet na *primeira* vez que é executada para baixar a biblioteca `MathJax` de um CDN. |
+| RNF-016 | Restrição (Dependência PySide6) | A aplicação requer o pacote `PySide6-WebEngineWidgets` (que às vezes requer instalação separada) para o preview e o editor de fórmulas. |
+| RNF-017 | Dívida Técnica (DRY) | As classes `CropLabel` (em `dialogo_brasao.py` e `dialogo_figura.py`) estão duplicadas. Uma alteração em uma deve ser replicada manualmente na outra. |
+
+Com certeza. O capítulo de "Metodologia" é onde você explica *como* o seu TCC (o software Formatheus) foi construído, desde a concepção até a implementação, justificando as suas escolhas.
+
+O capítulo de "Arquitetura" (que detalhamos) foca no **"O Quê?"** (Quais são os blocos?). A "Metodologia" foca no **"Como?"** e no **"Por quê?"** (Como esses blocos foram construídos e por que você escolheu essas ferramentas?).
+
+Aqui está uma estrutura detalhada para o seu capítulo de Metodologia, usando todo o conhecimento que documentamos sobre o seu programa.
+
+---
+
+# METODOLOGIA DE DESENVOLVIMENTO
+
+### 2.1. Introdução
+
+Este capítulo detalha a metodologia empregada para a concepção, projeto e desenvolvimento da aplicação *Formatheus*. O objetivo foi construir uma ferramenta de software robusta, capaz de gerenciar todo o ciclo de vida da escrita acadêmica, desde a edição de texto até a geração de documentos finais (`.docx`) e pré-visualizações em tempo real (`HTML`), em estrita conformidade com as normas ABNT.
+
+A metodologia pode ser dividida em quatro pilares:
+1.  **Abordagem de Desenvolvimento** (O processo de gerenciamento).
+2.  **Levantamento de Requisitos** (A definição do problema).
+3.  **Seleção de Tecnologias** (As ferramentas escolhidas e suas justificativas).
+4.  **Metodologia de Implementação** (As soluções técnicas para os problemas complexos).
+
+### 2.2. Abordagem de Desenvolvimento
+
+Para este projeto, foi adotado um modelo de **Desenvolvimento Iterativo e Incremental**, que se assemelha à Prototipagem Evolutiva.
+
+Ao invés de um modelo "Cascata" (Waterfall) rígido, onde todos os requisitos são definidos antes do início da codificação, a abordagem iterativa permitiu que o software fosse construído em ciclos:
+
+1.  **Ciclo 1 (Base):** Implementação da estrutura de dados (`documento.py`), o editor de texto (`aba_conteudo.py`) e a geração de um `.docx` simples (`gerador_docx.py`).
+2.  **Ciclo 2 (Preview):** Adição do complexo `gerador_preview.py` para fornecer feedback visual instantâneo ao usuário.
+3.  **Ciclo 3 (Recursos Avançados):** Adição de funcionalidades complexas, como o `DialogoFormula` (com renderização LaTeX) e as ferramentas de corte (`CropLabel`).
+4.  **Ciclo 4 (Robustez):** Implementação dos sistemas de segurança (`gerenciador_recuperacao.py`).
+
+Essa abordagem permitiu que *feedbacks* (como os bugs de paginação que encontramos) fossem corrigidos e refinados em cada ciclo, levando a um produto final mais estável.
+
+### 2.3. Levantamento de Requisitos
+
+A primeira etapa do projeto consistiu em definir as necessidades dos usuários (estudantes, pesquisadores). O resultado foi o documento de **Requisitos Funcionais (RF)** e **Não Funcionais (RNF)** que detalhamos anteriormente.
+
+* **Requisitos Funcionais Chave:** Incluíram o gerenciamento de projeto (`.abnf`), a edição de capítulos, o gerenciamento de ativos (figuras, tabelas, fórmulas), a geração de preview em tempo real e a exportação final para `.docx` com regras ABNT.
+* **Requisitos Não Funcionais Chave:** Incluíram a *precisão* da simulação (RNF-008), a *portabilidade* do projeto (RNF-011) e a *robustez* contra perda de dados (RNF-009, RNF-010).
+
+### 2.4. Seleção de Tecnologias (Justificativa da "Stack")
+
+A escolha das ferramentas foi um pilar central da metodologia, focando em desempenho, robustez e na capacidade de resolver problemas complexos específicos:
+
+* **Linguagem: `Python`**
+    * **Justificativa:** Linguagem de alto nível, com vasta biblioteca padrão (usada para `os`, `json`, `zipfile`, `tempfile`) e um ecossistema maduro para as bibliotecas necessárias (PySide6, Pillow, python-docx).
+
+* **Interface Gráfica (GUI): `PySide6` (Qt 6)**
+    * **Justificativa:** Um framework *cross-platform* robusto para aplicações desktop. Foi escolhido por sua rica biblioteca de componentes (QWidgets) e, crucialmente, por incluir o módulo `QtWebEngineWidgets`.
+
+* **Formato de Projeto (`.abnf`): `zipfile` + `json`**
+    * **Justificativa:** Para atender ao requisito de portabilidade (RNF-011), foi projetado um formato de arquivo customizado. O `.abnf` é uma "artemanha" padrão da indústria (um arquivo `.zip` renomeado) que contém o `documento.json` (o "cérebro" com os dados) e todas as mídias (imagens, fórmulas), garantindo que o projeto seja um arquivo único e autocontido.
+
+* **Renderização Híbrida: `QWebEngineView`**
+    * **Justificativa:** Esta foi uma decisão de arquitetura chave. Renderizar um documento A4 paginado com fluxo de texto justificado em Qt nativo (`QTextDocument`) é extremamente complexo e limitado.
+    * **Solução:** A metodologia foi **híbrida**. Usamos o `QWebEngineView` (um navegador Chromium) para renderizar um preview em `HTML/CSS`, que é a tecnologia *certa* para layout de texto e página.
+
+* **Renderização de Fórmulas: `MathJax` (JavaScript)**
+    * **Justificativa:** Em vez de "reinventar a roda", a metodologia foi integrar a melhor ferramenta de renderização LaTeX do mercado. O `QWebEngineView` permitiu carregar o `latex_renderer.html`, que importa o `MathJax` de um CDN.
+
+* **Geração de Documento: `python-docx`**
+    * **Justificativa:** A biblioteca padrão para criar e manipular arquivos `.docx` programaticamente, sem depender de uma instalação do Microsoft Word (exceto para o sumário).
+
+* **Processamento de Imagem e Texto: `Pillow (PIL)`**
+    * **Justificativa:** Usada para duas tarefas críticas:
+        1.  **Imagens:** Processamento de backend para as ferramentas de corte (`img.crop`, `ImageDraw.polygon`).
+        2.  **Texto:** A "artemanha" central do `gerador_preview.py`. Foi usada para carregar a fonte (`ImageFont.truetype`) e *medir* a largura exata de cada palavra (`font_medidor.getbbox`), permitindo uma simulação de paginação precisa.
+
+* **Atualização do Sumário: `pywin32`**
+    * **Justificativa (Gambiarra):** A biblioteca `python-docx` *não pode* atualizar campos dinâmicos (como um Sumário). A única solução programática foi usar `pywin32` para automatizar o MS Word (em segundo plano) e forçá-lo a preencher os números de página do sumário.
+    * **Mitigação:** O código é "defensivo" e só tenta executar esta etapa se `WIN32_AVAILABLE` for `True`, não travando em outros sistemas.
+
+### 2.5. Metodologia de Implementação (Solução dos Desafios)
+
+A metodologia de implementação focou em resolver os desafios mais complexos do projeto através de "artemanhas" e padrões de design específicos:
+
+* **Desafio 1: Sincronização do Preview (O Problema do "Vazamento" e "Desperdício")**
+    * **Problema:** O simulador (Python) e o renderizador (CSS) não concordavam sobre a altura do conteúdo, causando vazamento de texto ou margens inferiores gigantes.
+    * **Metodologia (Medição Exata):** A solução foi abandonar a "adivinhação" (`CARACTERES_POR_LINHA`). A metodologia de `gerador_preview.py` foi refatorada para:
+        1.  **Sincronizar Réguas:** O Python (`ALTURA_CONTEUDO_PAGINA = 24.7`) e o CSS (`padding: 3cm 2cm 2cm 3cm;`) foram forçados a usar as mesmas medidas de página.
+        2.  **Medir Texto:** `_calcular_altura_paragrafo` usa `Pillow` para medir a largura exata de cada palavra em `Times New Roman 12pt` e calcular o número exato de linhas.
+        3.  **Medir Mídia:** `_get_image_aspect_ratio` (com `PIL`) e `_get_svg_aspect_ratio` (com `re`) medem a proporção real de figuras e fórmulas para calcular suas alturas exatas.
+        4.  **Quebra de Palavra Longa:** A lógica foi robustecida para lidar com o caso "AAAAA..." (palavras sem espaço), quebrando-as à força.
+
+* **Desafio 2: Edição Avançada de Imagem (Corte Poligonal)**
+    * **Problema:** `PIL` não suporta corte poligonal.
+    * **Metodologia (Máscara Alfa):** A solução (em `dialogo_figura.py` e `dialogo_brasao.py`) foi a técnica de máscara:
+        1.  Uma máscara preta (`Image.new("L")`) do tamanho da imagem é criada.
+        2.  O polígono do usuário é desenhado em branco (`ImageDraw.polygon`) na máscara.
+        3.  A imagem original é "colada" em uma nova imagem transparente, usando a máscara (`img.paste(mask=mask)`). Isso faz com que apenas os pixels "brancos" (o polígono) sejam mantidos.
+
+* **Desafio 3: Comunicação Híbrida (Python <-> JavaScript)**
+    * **Problema:** Como fazer o `DialogoFormula.py` (Python) obter o `.svg` renderizado pelo `latex_renderer.html` (JavaScript)?
+    * **Metodologia (Download Falso):** A solução foi uma "coreografia" de eventos:
+        1.  Python chama `window.prepareAndTriggerDownload()` (JS).
+        2.  JS cria um `Blob` (arquivo em memória) e simula um clique em um link de download.
+        3.  Python (PySide6) intercepta o sinal `downloadRequested`.
+        4.  Python salva o "download" (o `.svg`) em uma pasta temporária.
+        5.  Python (Qt) usa `QSvgRenderer` para converter esse `.svg` em `.png`.
+
+* **Desafio 4: Segurança de Dados (Robustez)**
+    * **Problema:** O usuário pode perder dados por travamentos ou erro humano.
+    * **Metodologia (Três Camadas):**
+        1.  **Auto-Save (Falha do App):** O `gerenciador_recuperacao.py` salva um `.abnf.recovery` em `%LOCALAPPDATA%`. A "artemanha" de usar uma pasta do sistema (em vez da pasta do projeto) protege os dados mesmo se o projeto estiver em um pen drive que seja removido.
+        2.  **Backup (Erro Humano):** O `gerenciador_recuperacao.py` salva um `.abnf.bak` com timestamp na pasta do projeto a cada "Salvar" manual, criando um histórico de versões.
+        3.  **Portabilidade (Transferência):** O `gerenciador_projeto.py` salva caminhos de imagem *relativos* dentro do `.abnf` (zip), mas os "reidrata" para caminhos *absolutos* (apontando para uma pasta `tempfile`) ao carregar.
+
+### 2.6. Metodologia de Testes
+
+Para garantir a qualidade do software, uma abordagem de testes multi-nível foi empregada:
+
+1.  **Testes de Unidade (Implícitos):** Cada módulo foi testado individualmente. (Ex: Testar se `referencia.py` formatava corretamente o nome "SILVA, Matheus da").
+2.  **Testes de Integração:** Focados na "conversa" entre os módulos. (Ex: Testar se os marcadores `{{...}}` criados pelo `aba_conteudo.py` eram corretamente lidos e substituídos pelo `gerador_docx.py` e `gerador_preview.py`).
+3.  **Testes Funcionais (Casos de Uso):** Testes de ponta-a-ponta. (Ex: "1. Criar novo TCC. 2. Adicionar brasão. 3. Escrever a introdução. 4. Adicionar uma figura com corte poligonal. 5. Gerar o .docx. 6. Verificar se o .docx e o preview estão idênticos").
+4.  **Testes de Estresse e Regressão:**
+    * **Estresse:** Testar o simulador de preview com casos extremos (ex: a "palavra infinita" `AAAAA...`).
+    * **Regressão:** Após corrigir um bug (ex: o "vazamento" de texto), verificar se a correção não introduziu um bug oposto (ex: o "desperdício" de espaço).
