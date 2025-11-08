@@ -67,9 +67,7 @@ class AbaConteudo(QWidget):
         btn_add_sub = QPushButton("Novo Subtópico")
         btn_del = QPushButton("Remover")
         
-        # --- MUDANÇA (Define classe QSS) ---
         btn_del.setProperty("cssClass", "destructive")
-        # ------------------------------------
         
         btn_layout.addWidget(btn_add_topico)
         btn_layout.addWidget(btn_add_sub)
@@ -83,7 +81,7 @@ class AbaConteudo(QWidget):
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         self.label_capitulo_atual = QLabel("Selecione um tópico para editar")
-        self.label_capitulo_atual.setProperty("cssClass", "titulo") # Aplica estilo
+        self.label_capitulo_atual.setProperty("cssClass", "titulo")
         
         self.editor_capitulo = QTextEdit()
         self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
@@ -108,10 +106,8 @@ class AbaConteudo(QWidget):
         btn_edit_tabela = QPushButton("Editar")
         btn_del_tabela = QPushButton("Remover")
         
-        # --- MUDANÇA (Define classes QSS) ---
         btn_edit_tabela.setProperty("cssClass", "utility")
         btn_del_tabela.setProperty("cssClass", "destructive")
-        # ------------------------------------
         
         tabelas_btn_layout.addWidget(btn_add_tabela)
         tabelas_btn_layout.addWidget(btn_edit_tabela)
@@ -138,10 +134,8 @@ class AbaConteudo(QWidget):
         btn_edit_figura = QPushButton("Editar")
         btn_del_figura = QPushButton("Remover")
 
-        # --- MUDANÇA (Define classes QSS) ---
         btn_edit_figura.setProperty("cssClass", "utility")
         btn_del_figura.setProperty("cssClass", "destructive")
-        # ------------------------------------
         
         figuras_btn_layout.addWidget(btn_add_figura)
         figuras_btn_layout.addWidget(btn_edit_figura)
@@ -168,10 +162,8 @@ class AbaConteudo(QWidget):
         btn_edit_formula = QPushButton("Editar")
         btn_del_formula = QPushButton("Remover")
 
-        # --- MUDANÇA (Define classes QSS) ---
         btn_edit_formula.setProperty("cssClass", "utility")
         btn_del_formula.setProperty("cssClass", "destructive")
-        # ------------------------------------
         
         formulas_btn_layout.addWidget(btn_add_formula)
         formulas_btn_layout.addWidget(btn_edit_formula)
@@ -190,10 +182,30 @@ class AbaConteudo(QWidget):
         self.bancos_tabs.addTab(figuras_widget, "Figuras")
         self.bancos_tabs.addTab(formulas_widget, "Fórmulas")
 
+        # --- INÍCIO DA CORREÇÃO: Adiciona Toolbar de Formatação ---
+        
+        format_toolbar = QHBoxLayout()
+        format_toolbar.addWidget(QLabel("Formatação:"))
+        
+        btn_quebra_pagina = QPushButton("Inserir Quebra de Página")
+        btn_quebra_pagina.setProperty("cssClass", "utility")
+        btn_quebra_pagina.clicked.connect(self._inserir_quebra_pagina)
+        format_toolbar.addWidget(btn_quebra_pagina)
+        
+        btn_pagina_em_branco = QPushButton("Inserir Página em Branco")
+        btn_pagina_em_branco.setProperty("cssClass", "utility")
+        btn_pagina_em_branco.clicked.connect(self._inserir_pagina_em_branco)
+        format_toolbar.addWidget(btn_pagina_em_branco)
+        
+        format_toolbar.addStretch()
+        
+        # --- FIM DA CORREÇÃO ---
+
         # Adiciona os widgets ao layout principal com as novas proporções
         right_layout.addWidget(self.label_capitulo_atual)
-        right_layout.addWidget(self.editor_capitulo, 3) # Editor de texto com mais espaço (fator 3)
-        right_layout.addWidget(self.bancos_tabs, 2)     # Abas com espaço equilibrado (fator 2)
+        right_layout.addLayout(format_toolbar) # Adiciona a nova toolbar
+        right_layout.addWidget(self.editor_capitulo, 3) # Editor de texto
+        right_layout.addWidget(self.bancos_tabs, 2)     # Abas 
         layout.addWidget(right_panel)
         
         self._popular_arvore()
@@ -230,6 +242,16 @@ class AbaConteudo(QWidget):
         else:
             for formula in self.documento.banco_formulas:
                 self.lista_formulas.addItem(formula.legenda)
+    
+    @QtCore.Slot()
+    def _inserir_quebra_pagina(self):
+        """Insere o marcador de quebra de página no editor."""
+        self.editor_capitulo.insertPlainText("\n{{QUEBRA_PAGINA}}\n")
+
+    @QtCore.Slot()
+    def _inserir_pagina_em_branco(self):
+        """Insere o marcador de página em branco no editor."""
+        self.editor_capitulo.insertPlainText("\n{{PAGINA_EM_BRANCO}}\n")
     
     @QtCore.Slot()
     def _on_editor_text_changed(self):

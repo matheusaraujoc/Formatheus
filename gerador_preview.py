@@ -162,54 +162,81 @@ class GeradorHTMLPreview:
                 else:
                     altura_total_paragrafo -= altura_que_cabe
                     simular_nova_pagina()
-                    is_continuacao = True # Próxima parte do parágrafo não terá recuo
+                    is_continuacao = True
 
         def coletar_recursivo(no_pai: Capitulo, prefixo_numeracao=""):
             for i, no_filho in enumerate(no_pai.filhos, 1):
                 numero_completo = f"{prefixo_numeracao}{i}"
+                nivel = len(numero_completo.split('.'))
+
+                # --- INÍCIO DA CORREÇÃO (Estimativa) ---
+                if nivel == 1 and i > 1:
+                    simular_nova_pagina()
+                # --- FIM DA CORREÇÃO ---
+
                 pagina_prevista = pagina_atual
                 altura_necessaria_titulo = ALTURA_TITULO_SECAO + (ALTURA_LINHA_TEXTO * 2)
                 if altura_restante < altura_necessaria_titulo:
                     pagina_prevista += 1
+                
                 self.entradas_sumario.append({
-                    "numero": numero_completo, "titulo": no_filho.titulo, "nivel": len(numero_completo.split('.')),
+                    "numero": numero_completo, "titulo": no_filho.titulo, "nivel": nivel,
                     "id_ancora": f"secao-{numero_completo.replace('.', '-')}", "pagina": pagina_prevista
                 })
                 simular_adicao_bloco(ALTURA_TITULO_SECAO)
+                
                 if no_filho.conteudo:
-                    padrao = r"\{\{(Tabela|Figura|Formula):([^}]+)\}\}"
+                    padrao = r"\{\{(?:(Tabela|Figura|Formula):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
                     partes = re.split(padrao, no_filho.conteudo)
                     is_continuacao_paragrafo = False
-                    for k, parte in enumerate(partes):
-                        if k % 3 == 0:
-                            if parte.strip():
-                                paragrafos = parte.strip().split('\n')
-                                for j, paragrafo_texto in enumerate(paragrafos):
-                                    if paragrafo_texto.strip():
-                                        simular_paragrafo_quebravel(paragrafo_texto, is_continuacao_paragrafo)
-                                        is_continuacao_paragrafo = False 
+                    
+                    idx = 0
+                    while idx < len(partes):
+                        bloco_de_texto = partes[idx]
+                        if bloco_de_texto and bloco_de_texto.strip():
+                            paragrafos = bloco_de_texto.strip().split('\n')
+                            for j, paragrafo_texto in enumerate(paragrafos):
+                                if paragrafo_texto.strip():
+                                    simular_paragrafo_quebravel(paragrafo_texto, is_continuacao_paragrafo)
                                     is_continuacao_paragrafo = False 
-                            else:
-                                is_continuacao_paragrafo = False
-                        elif k % 3 == 1:
-                            tipo, titulo = parte, partes[k+1]
-                            if tipo == "Tabela":
-                                obj = next((t for t in self.doc_abnt.banco_tabelas if t.titulo == titulo), None)
-                                if obj and obj.dados: simular_adicao_bloco((len(obj.dados) * ALTURA_LINHA_TABELA) + (ALTURA_LEGENDA * 2))
-                            elif tipo == "Figura":
-                                obj = next((f for f in self.doc_abnt.banco_figuras if f.titulo == titulo), None)
-                                if obj:
-                                    caminho_img = obj.caminho_processado or obj.caminho_original
-                                    aspect_ratio = self._get_image_aspect_ratio(caminho_img)
-                                    altura_imagem_cm = obj.largura_cm * aspect_ratio
-                                    simular_adicao_bloco(altura_imagem_cm + (ALTURA_LEGENDA * 2))
-                            elif tipo == "Formula":
-                                obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo), None)
-                                if obj:
-                                    aspect_ratio = self._get_svg_aspect_ratio(obj.caminho_svg or obj.caminho_processado_png)
-                                    altura_imagem_cm = obj.largura_cm * aspect_ratio
-                                    simular_adicao_bloco(altura_imagem_cm + ALTURA_LEGENDA + 0.5) 
+                                is_continuacao_paragrafo = False 
+                        else:
                             is_continuacao_paragrafo = False
+
+                        if idx + 3 < len(partes):
+                            tipo_obj = partes[idx+1]
+                            titulo_obj = partes[idx+2]
+                            comando = partes[idx+3]
+
+                            if tipo_obj and titulo_obj:
+                                if tipo_obj == "Tabela":
+                                    obj = next((t for t in self.doc_abnt.banco_tabelas if t.titulo == titulo_obj), None)
+                                    if obj and obj.dados: simular_adicao_bloco((len(obj.dados) * ALTURA_LINHA_TABELA) + (ALTURA_LEGENDA * 2))
+                                elif tipo_obj == "Figura":
+                                    obj = next((f for f in self.doc_abnt.banco_figuras if f.titulo == titulo_obj), None)
+                                    if obj:
+                                        caminho_img = obj.caminho_processado or obj.caminho_original
+                                        aspect_ratio = self._get_image_aspect_ratio(caminho_img)
+                                        altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                        simular_adicao_bloco(altura_imagem_cm + (ALTURA_LEGENDA * 2))
+                                elif tipo_obj == "Formula":
+                                    obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo_obj), None)
+                                    if obj:
+                                        aspect_ratio = self._get_svg_aspect_ratio(obj.caminho_svg or obj.caminho_processado_png)
+                                        altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                        simular_adicao_bloco(altura_imagem_cm + ALTURA_LEGENDA + 0.5) 
+                            
+                            elif comando:
+                                if comando == "QUEBRA_PAGINA":
+                                    simular_nova_pagina()
+                                elif comando == "PAGINA_EM_BRANCO":
+                                    simular_nova_pagina() 
+                                    simular_nova_pagina() 
+                            
+                            is_continuacao_paragrafo = False
+                        
+                        idx += 4
+                        
                 coletar_recursivo(no_filho, f"{numero_completo}.")
         
         coletar_recursivo(self.doc_abnt.estrutura_textual)
@@ -418,6 +445,10 @@ class GeradorHTMLPreview:
             }
             /* Estas regras não são mais necessárias se o .brasao-container já é flex */
             /* --- FIM DA CORREÇÃO --- */
+
+            .pagina.pagina-em-branco::after {
+                content: ""; /* Remove o número da página */
+            }
             
         </style>
         """
@@ -501,62 +532,82 @@ class GeradorHTMLPreview:
         for i, no_filho in enumerate(no_pai.filhos, 1):
             numero_completo = f"{prefixo_numeracao}{i}"
             nivel = len(numero_completo.split('.'))
+
+            # --- INÍCIO DA CORREÇÃO (Renderização) ---
+            if nivel == 1 and i > 1:
+                self._nova_pagina()
+            # --- FIM DA CORREÇÃO ---
+            
             titulo_texto = f"{numero_completo} {no_filho.titulo.upper() if nivel == 1 and not self.is_artigo else no_filho.titulo}"
             id_ancora = f"secao-{numero_completo.replace('.', '-')}"
             self._adicionar_elemento_bloco(f"<h1 id='{id_ancora}'>{titulo_texto}</h1>", ALTURA_TITULO_SECAO)
             
             if no_filho.conteudo:
-                padrao = r"\{\{(Tabela|Figura|Formula):([^}]+)\}\}"
+                padrao = r"\{\{(?:(Tabela|Figura|Formula):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
                 partes = re.split(padrao, no_filho.conteudo)
                 
                 is_continuacao_paragrafo = False
                 
-                for k, parte in enumerate(partes):
-                    if k % 3 == 0: # É texto
-                        if parte.strip():
-                            paragrafos = parte.strip().split('\n')
-                            for j, paragrafo_texto in enumerate(paragrafos):
-                                if paragrafo_texto.strip():
-                                    eh_novo_paragrafo = (j > 0 or not is_continuacao_paragrafo)
-                                    self._adicionar_paragrafo_quebravel(paragrafo_texto, is_continuacao=(not eh_novo_paragrafo))
-                                    is_continuacao_paragrafo = True 
-                    elif k % 3 == 1: # É um bloco (Figura, etc.)
-                        tipo, titulo = parte, partes[k+1]
+                idx = 0
+                while idx < len(partes):
+                    bloco_de_texto = partes[idx]
+                    if bloco_de_texto and bloco_de_texto.strip():
+                        paragrafos = bloco_de_texto.strip().split('\n')
+                        for j, paragrafo_texto in enumerate(paragrafos):
+                            if paragrafo_texto.strip():
+                                eh_novo_paragrafo = (j > 0 or not is_continuacao_paragrafo)
+                                self._adicionar_paragrafo_quebravel(paragrafo_texto, is_continuacao=(not eh_novo_paragrafo))
+                                is_continuacao_paragrafo = True 
+                    
+                    if idx + 3 < len(partes):
+                        tipo_obj = partes[idx+1]
+                        titulo_obj = partes[idx+2]
+                        comando = partes[idx+3]
                         
-                        if tipo == "Tabela":
-                            obj = next((t for t in self.doc_abnt.banco_tabelas if t.titulo == titulo), None)
-                            if obj:
-                                self.contador_tabelas += 1; obj.numero = self.contador_tabelas
-                                altura = (len(obj.dados) * ALTURA_LINHA_TABELA) + (ALTURA_LEGENDA * 2) if obj.dados else (ALTURA_LEGENDA * 2)
-                                self._adicionar_elemento_bloco(self._renderizar_tabela_html(obj), altura)
-                                
-                        elif tipo == "Figura":
-                            obj = next((f for f in self.doc_abnt.banco_figuras if f.titulo == titulo), None)
-                            if obj:
-                                self.contador_figuras += 1; obj.numero = self.contador_figuras
-                                caminho_img = obj.caminho_processado or obj.caminho_original
-                                aspect_ratio = self._get_image_aspect_ratio(caminho_img) 
-                                altura_imagem_cm = obj.largura_cm * aspect_ratio
-                                altura_total_bloco = altura_imagem_cm + (ALTURA_LEGENDA * 2)
-                                self._adicionar_elemento_bloco(self._renderizar_figura_html(obj), altura_total_bloco)
-                                
-                        elif tipo == "Formula":
-                            obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo), None)
-                            if obj:
-                                self.contador_formulas += 1; obj.numero = self.contador_formulas
-                                
-                                caminho_imagem = obj.caminho_svg
-                                if not caminho_imagem or not os.path.exists(caminho_imagem):
-                                    caminho_imagem = obj.caminho_processado_png
-                                
-                                aspect_ratio = self._get_svg_aspect_ratio(caminho_imagem)
-                                altura_imagem_cm = obj.largura_cm * aspect_ratio
-                                altura_imagem_cm += 0.5 
-                                altura_total_bloco = altura_imagem_cm + ALTURA_LEGENDA
-                                
-                                self._adicionar_elemento_bloco(self._renderizar_formula_html(obj), altura_total_bloco)
-                        
+                        if tipo_obj and titulo_obj:
+                            if tipo_obj == "Tabela":
+                                obj = next((t for t in self.doc_abnt.banco_tabelas if t.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_tabelas += 1; obj.numero = self.contador_tabelas
+                                    altura = (len(obj.dados) * ALTURA_LINHA_TABELA) + (ALTURA_LEGENDA * 2) if obj.dados else (ALTURA_LEGENDA * 2)
+                                    self._adicionar_elemento_bloco(self._renderizar_tabela_html(obj), altura)
+                                    
+                            elif tipo_obj == "Figura":
+                                obj = next((f for f in self.doc_abnt.banco_figuras if f.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_figuras += 1; obj.numero = self.contador_figuras
+                                    caminho_img = obj.caminho_processado or obj.caminho_original
+                                    aspect_ratio = self._get_image_aspect_ratio(caminho_img) 
+                                    altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                    altura_total_bloco = altura_imagem_cm + (ALTURA_LEGENDA * 2)
+                                    self._adicionar_elemento_bloco(self._renderizar_figura_html(obj), altura_total_bloco)
+                                    
+                            elif tipo_obj == "Formula":
+                                obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo_obj), None)
+                                if obj:
+                                    self.contador_formulas += 1; obj.numero = self.contador_formulas
+                                    caminho_imagem = obj.caminho_svg
+                                    if not caminho_imagem or not os.path.exists(caminho_imagem):
+                                        caminho_imagem = obj.caminho_processado_png
+                                    aspect_ratio = self._get_svg_aspect_ratio(caminho_imagem)
+                                    altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                    altura_imagem_cm += 0.5 
+                                    altura_total_bloco = altura_imagem_cm + ALTURA_LEGENDA
+                                    self._adicionar_elemento_bloco(self._renderizar_formula_html(obj), altura_total_bloco)
+                            
+                        elif comando:
+                            if comando == "QUEBRA_PAGINA":
+                                self._nova_pagina()
+                            elif comando == "PAGINA_EM_BRANCO":
+                                self._nova_pagina() 
+                                self.paginas_html.append('<div class="pagina pagina-em-branco pre-textual"></div>') 
+                                self.classe_pagina_atual = 'pagina'
+                                self.conteudo_pagina_atual = [self.classe_pagina_atual]
+                                self.altura_restante = ALTURA_CONTEUDO_PAGINA
+
                         is_continuacao_paragrafo = False
+                    
+                    idx += 4
                                 
             self._renderizar_secoes_recursivamente_html(no_filho, f"{numero_completo}.")
     

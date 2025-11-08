@@ -153,43 +153,69 @@ class GeradorDOCX:
         for i, no_filho in enumerate(no_pai.filhos, 1):
             numero_completo = f"{prefixo_numeracao}{i}"
             nivel_titulo = len(numero_completo.split('.'))
+            
+            # --- INÍCIO DA CORREÇÃO ---
+            # Se for um capítulo de Nível 1 (ex: "2", "3", etc.) E não for o
+            # primeiro capítulo (i > 1), força uma quebra de página.
+            if nivel_titulo == 1 and i > 1:
+                self.doc.add_page_break()
+            # --- FIM DA CORREÇÃO ---
+            
             self.regras.aplicar_estilo_titulo_secao(self.doc, numero_completo, no_filho.titulo, nivel=nivel_titulo)
 
             if no_filho.conteudo:
-                padrao = r"\{\{(Tabela|Figura|Formula):([^}]+)\}\}"
+                # O regex corrigido da última vez:
+                padrao = r"\{\{(?:(Tabela|Figura|Formula):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
                 partes = re.split(padrao, no_filho.conteudo)
 
-                for k, parte in enumerate(partes):
-                    if k % 3 == 0:
-                        bloco_de_texto = parte
-                        if bloco_de_texto.strip():
-                            paragrafos = bloco_de_texto.strip().split('\n')
-                            for texto_paragrafo in paragrafos:
-                                if texto_paragrafo.strip():
-                                    p = self.doc.add_paragraph()
-                                    self.regras.aplicar_estilo_paragrafo_normal(p, texto_paragrafo)
-                    elif k % 3 == 1:
-                        tipo = parte
-                        titulo = partes[k+1]
-                        if tipo == "Tabela":
-                            obj = next((t for t in self.doc_abnt.banco_tabelas if t.titulo == titulo), None)
-                            if obj:
-                                self.contador_tabelas += 1
-                                obj.numero = self.contador_tabelas
-                                self._renderizar_tabela(obj)
-                        elif tipo == "Figura":
-                            obj = next((f for f in self.doc_abnt.banco_figuras if f.titulo == titulo), None)
-                            if obj:
-                                self.contador_figuras += 1
-                                obj.numero = self.contador_figuras
-                                self._renderizar_figura(obj)
-                        elif tipo == "Formula":
-                            obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo), None)
-                            if obj:
-                                self.contador_formulas += 1
-                                obj.numero = self.contador_formulas
-                                self._renderizar_formula(obj)
-
+                idx = 0
+                while idx < len(partes):
+                    bloco_de_texto = partes[idx]
+                    if bloco_de_texto and bloco_de_texto.strip():
+                        paragrafos = bloco_de_texto.strip().split('\n')
+                        for texto_paragrafo in paragrafos:
+                            if texto_paragrafo.strip():
+                                p = self.doc.add_paragraph()
+                                self.regras.aplicar_estilo_paragrafo_normal(p, texto_paragrafo)
+                    
+                    if idx + 3 < len(partes):
+                        tipo_obj = partes[idx+1]
+                        titulo_obj = partes[idx+2]
+                        comando = partes[idx+3]
+                        
+                        if tipo_obj and titulo_obj:
+                            if tipo_obj == "Tabela":
+                                obj = next((t for t in self.doc_abnt.banco_tabelas if t.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_tabelas += 1
+                                    obj.numero = self.contador_tabelas
+                                    self._renderizar_tabela(obj)
+                            elif tipo_obj == "Figura":
+                                obj = next((f for f in self.doc_abnt.banco_figuras if f.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_figuras += 1
+                                    obj.numero = self.contador_figuras
+                                    self._renderizar_figura(obj)
+                            elif tipo_obj == "Formula":
+                                obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo_obj), None)
+                                if obj:
+                                    self.contador_formulas += 1
+                                    obj.numero = self.contador_formulas
+                                    self._renderizar_formula(obj)
+                        
+                        elif comando:
+                            if comando == "QUEBRA_PAGINA":
+                                self.doc.add_page_break()
+                            elif comando == "PAGINA_EM_BRANCO":
+                                self.doc.add_page_break()
+                                p = self.doc.add_paragraph()
+                                run = p.add_run()
+                                run.text = " " 
+                                p.paragraph_format.space_after = Pt(0)
+                                self.doc.add_page_break()
+                                
+                    idx += 4
+            
             self._renderizar_secoes_recursivamente(no_filho, prefixo_numeracao=f"{numero_completo}.")
 
     def _renderizar_tabela(self, tabela_obj):
