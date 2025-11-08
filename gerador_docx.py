@@ -242,11 +242,6 @@ class GeradorDOCX:
         if tabela_obj.estilo_borda == 'abnt':
             self.regras.aplicar_estilo_tabela_abnt(t)
 
-        if tabela_obj.fonte:
-            p_fonte = self.doc.add_paragraph()
-            p_fonte.add_run(f"Fonte: {tabela_obj.fonte}")
-            self.regras.aplicar_estilo_legenda(p_fonte, is_titulo=False)
-
     def _renderizar_figura(self, figura_obj):
         p_titulo = self.doc.add_paragraph()
         p_titulo.add_run(f"Figura {figura_obj.numero} – {figura_obj.titulo}")

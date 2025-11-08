@@ -1,21 +1,22 @@
 # gerador_preview.py
-# Descrição: Versão com a correção do bug de cálculo de altura restante após adicionar títulos.
+# Descrição: Versão com lógica de quebra de palavras longas (word-break)
+# para corrigir o vazamento de texto contínuo.
 
 import os
 import re
 import math
 from documento import DocumentoABNT, Capitulo
+from PIL import Image, ImageFont 
 
 # --- CONSTANTES DE ESTIMATIVA DE ALTURA (EM CM) ---
-# --- CORREÇÃO FINAL: Reduzido de 24.7 para 24.0 para criar um "buffer" inferior. ---
-# Isso evita que o texto preencha a página até a borda.
-ALTURA_CONTEUDO_PAGINA = 24.0
-ALTURA_LINHA_TEXTO = 0.64 # (12pt / 72 * 2.54) * 1.5 = 0.635cm. Arredondado.
+ALTURA_CONTEUDO_PAGINA = 24.7
+ALTURA_LINHA_TEXTO = 0.64 
 ALTURA_TITULO_SECAO = 1.5
 ALTURA_LEGENDA = 1.2
 ALTURA_LINHA_TABELA = 0.8
-ALTURA_FORMULA_ESTIMADA = 4.0
-CARACTERES_POR_LINHA = 70 # Estimativa pessimista
+LARGURA_CONTEUDO_CM = 16.0 
+RECUO_PRIMEIRA_LINHA_CM = 1.25
+#CARACTERES_POR_LINHA = 69 # <--- Não usamos mais isso
 
 class GeradorHTMLPreview:
     def __init__(self, doc_abnt: DocumentoABNT):
@@ -29,6 +30,110 @@ class GeradorHTMLPreview:
         self.contador_formulas = 0
         self.classe_pagina_atual = 'pagina'
         self.is_artigo = self.doc_abnt.configuracoes.tipo_trabalho == "Artigo Científico"
+
+        self.font_medidor = self._carregar_fonte_medidora()
+        self.PX_PER_CM = 96 / 2.54 
+        self.LARGURA_CONTEUDO_PX = LARGURA_CONTEUDO_CM * self.PX_PER_CM
+        self.RECUO_PRIMEIRA_LINHA_PX = RECUO_PRIMEIRA_LINHA_CM * self.PX_PER_CM
+        
+        # Mede um espaço e um caractere médio
+        try:
+            self.LARGURA_ESPACO_PX = self.font_medidor.getbbox(" ")[2]
+            # Usamos 'm' como char médio para estimar a quebra de palavras longas
+            self.LARGURA_CHAR_MEDIO_PX = self.font_medidor.getbbox("m")[2]
+            if self.LARGURA_CHAR_MEDIO_PX == 0: self.LARGURA_CHAR_MEDIO_PX = 9 # Fallback
+        except:
+            self.LARGURA_ESPACO_PX = 4 # Fallback
+            self.LARGURA_CHAR_MEDIO_PX = 9 # Fallback
+
+
+    def _carregar_fonte_medidora(self):
+        """Tenta carregar a fonte Times New Roman 12pt do sistema."""
+        try:
+            font_path = "C:/Windows/Fonts/times.ttf"
+            if not os.path.exists(font_path):
+                font_path = "C:/Windows/Fonts/timesbd.ttf"
+            return ImageFont.truetype(font_path, 16) # 12pt = 16px
+        except IOError:
+            print("AVISO: Fonte 'times.ttf' não encontrada. Usando fonte padrão do Pillow.")
+            try:
+                return ImageFont.load_default(16)
+            except:
+                return ImageFont.load_default()
+
+    # --- 1. FUNÇÃO DE CÁLCULO DE ALTURA (ATUALIZADA) ---
+    def _calcular_altura_paragrafo(self, texto: str, is_continuacao=False) -> float:
+        """
+        Calcula a altura real (em cm) que um parágrafo ocupará,
+        medindo a largura de cada palavra E quebrando palavras longas.
+        """
+        palavras = texto.strip().split()
+        if not palavras: return 0.0
+
+        linhas = 1
+        largura_linha_atual = 0
+        if not is_continuacao:
+            largura_linha_atual = self.RECUO_PRIMEIRA_LINHA_PX
+        
+        for palavra in palavras:
+            try:
+                bbox = self.font_medidor.getbbox(palavra); largura_palavra = bbox[2] - bbox[0]
+            except:
+                largura_palavra = len(palavra) * (self.LARGURA_CHAR_MEDIO_PX * 0.9) # fallback
+
+            # Tenta adicionar a palavra na linha atual
+            if (largura_linha_atual == (self.RECUO_PRIMEIRA_LINHA_PX if not is_continuacao else 0)) or \
+               (largura_linha_atual + self.LARGURA_ESPACO_PX + largura_palavra) <= self.LARGURA_CONTEUDO_PX:
+                # Sim, cabe. Adiciona.
+                largura_linha_atual += (self.LARGURA_ESPACO_PX if largura_linha_atual > 0 else 0) + largura_palavra
+            
+            else:
+                # Não cabe, quebra a linha.
+                linhas += 1
+                largura_linha_atual = largura_palavra # Palavra começa na nova linha
+            
+            # --- INÍCIO DA CORREÇÃO ---
+            # Se a palavra que acabamos de adicionar é TÃO LONGA que ainda
+            # ultrapassa a largura da linha, quebramos ela (o "AAAA..." caso)
+            while largura_linha_atual > self.LARGURA_CONTEUDO_PX:
+                # A palavra ocupou a linha inteira, mas ainda "sobrou"
+                linhas += 1
+                largura_linha_atual -= self.LARGURA_CONTEUDO_PX
+            # --- FIM DA CORREÇÃO ---
+
+        return linhas * ALTURA_LINHA_TEXTO
+
+    def _get_image_aspect_ratio(self, image_path):
+        if not image_path or not os.path.exists(image_path):
+            return 0.5625 
+        try:
+            with Image.open(image_path) as img:
+                width, height = img.size
+                if width > 0:
+                    return height / width 
+        except Exception as e:
+            print(f"Aviso: Não foi possível ler o aspect ratio da imagem {image_path}: {e}")
+        return 0.5625 
+
+    def _get_svg_aspect_ratio(self, svg_path):
+        if not svg_path or not os.path.exists(svg_path):
+            return 0.2 
+        try:
+            with open(svg_path, 'r', encoding='utf-8') as f:
+                svg_content = f.read(1024) 
+            match = re.search(r'viewBox="[\d\.\s-]* ([\d\.]+) ([\d\.]+)"', svg_content)
+            if match:
+                width = float(match.group(1)); height = float(match.group(2))
+                if width > 0: return height / width
+            width_match = re.search(r'width="([\d\.]+)(ex|pt|px)?"', svg_content)
+            height_match = re.search(r'height="([\d\.]+)(ex|pt|px)?"', svg_content)
+            if width_match and height_match:
+                width = float(width_match.group(1)); height = float(height_match.group(1))
+                if width > 0: return height / width
+            return 0.2 
+        except Exception as e:
+            print(f"Aviso: Não foi possível ler o aspect ratio do SVG {svg_path}: {e}")
+            return 0.2
 
     def _estimar_paginacao_e_coletar_sumario(self):
         self.entradas_sumario = []
@@ -47,16 +152,17 @@ class GeradorHTMLPreview:
                 altura_necessaria += ALTURA_LINHA_TEXTO * 2
             if altura_restante < altura_necessaria:
                 simular_nova_pagina()
-            altura_restante -= altura_necessaria # CORRIGIDO: Usar altura_necessaria
+            altura_restante -= altura_necessaria 
 
-        def simular_paragrafo_quebravel(texto):
+        def simular_paragrafo_quebravel(texto, is_continuacao=False):
             nonlocal altura_restante
             if not texto.strip(): return
-            num_linhas_total = math.ceil(len(texto.strip()) / CARACTERES_POR_LINHA)
-            altura_total_paragrafo = num_linhas_total * ALTURA_LINHA_TEXTO
+            
+            altura_total_paragrafo = self._calcular_altura_paragrafo(texto, is_continuacao)
+            
             while altura_total_paragrafo > 0:
                 altura_que_cabe = math.floor(altura_restante / ALTURA_LINHA_TEXTO) * ALTURA_LINHA_TEXTO
-                if altura_que_cabe <= 0:
+                if altura_que_cabe <= (ALTURA_LINHA_TEXTO * 2): # Evita 1 linha órfã
                     simular_nova_pagina()
                     continue
                 if altura_total_paragrafo <= altura_que_cabe:
@@ -65,6 +171,7 @@ class GeradorHTMLPreview:
                 else:
                     altura_total_paragrafo -= altura_que_cabe
                     simular_nova_pagina()
+                    is_continuacao = True # Próxima parte do parágrafo não terá recuo
 
         def coletar_recursivo(no_pai: Capitulo, prefixo_numeracao=""):
             for i, no_filho in enumerate(no_pai.filhos, 1):
@@ -81,13 +188,23 @@ class GeradorHTMLPreview:
                 if no_filho.conteudo:
                     padrao = r"\{\{(Tabela|Figura|Formula):([^}]+)\}\}"
                     partes = re.split(padrao, no_filho.conteudo)
+                    is_continuacao_paragrafo = False
                     for k, parte in enumerate(partes):
                         if k % 3 == 0:
                             if parte.strip():
                                 paragrafos = parte.strip().split('\n')
-                                for paragrafo_texto in paragrafos:
+                                for j, paragrafo_texto in enumerate(paragrafos):
                                     if paragrafo_texto.strip():
-                                        simular_paragrafo_quebravel(paragrafo_texto)
+                                        # Se for o primeiro parágrafo, usa o estado de continuação
+                                        simular_paragrafo_quebravel(paragrafo_texto, is_continuacao_paragrafo)
+                                        is_continuacao_paragrafo = False # Reseta para os próximos
+                                    # Se o parágrafo terminar, o próximo (após uma figura, etc.)
+                                    # será um novo parágrafo (com recuo).
+                                    is_continuacao_paragrafo = False 
+                            else:
+                                # Se a parte é vazia (ex: {{Figura}} no início),
+                                # o texto seguinte NÃO é uma continuação.
+                                is_continuacao_paragrafo = False
                         elif k % 3 == 1:
                             tipo, titulo = parte, partes[k+1]
                             if tipo == "Tabela":
@@ -95,9 +212,19 @@ class GeradorHTMLPreview:
                                 if obj and obj.dados: simular_adicao_bloco((len(obj.dados) * ALTURA_LINHA_TABELA) + (ALTURA_LEGENDA * 2))
                             elif tipo == "Figura":
                                 obj = next((f for f in self.doc_abnt.banco_figuras if f.titulo == titulo), None)
-                                if obj: simular_adicao_bloco((obj.largura_cm / 16 * 9) + (ALTURA_LEGENDA * 2))
+                                if obj:
+                                    caminho_img = obj.caminho_processado or obj.caminho_original
+                                    aspect_ratio = self._get_image_aspect_ratio(caminho_img)
+                                    altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                    simular_adicao_bloco(altura_imagem_cm + (ALTURA_LEGENDA * 2))
                             elif tipo == "Formula":
-                                simular_adicao_bloco(ALTURA_FORMULA_ESTIMADA + ALTURA_LEGENDA)
+                                obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo), None)
+                                if obj:
+                                    aspect_ratio = self._get_svg_aspect_ratio(obj.caminho_svg or obj.caminho_processado_png)
+                                    altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                    simular_adicao_bloco(altura_imagem_cm + ALTURA_LEGENDA + 0.5) 
+                            # Um bloco (figura, etc.) força o próximo texto a ser um novo parágrafo
+                            is_continuacao_paragrafo = False
                 coletar_recursivo(no_filho, f"{numero_completo}.")
         
         coletar_recursivo(self.doc_abnt.estrutura_textual)
@@ -128,56 +255,114 @@ class GeradorHTMLPreview:
         self.conteudo_pagina_atual.append(html)
         self.altura_restante -= altura_necessaria
 
-    def _adicionar_paragrafo_quebravel(self, texto_paragrafo):
+    # --- 5. FUNÇÃO DE RENDERIZAÇÃO ATUALIZADA (LÓGICA DE QUEBRA EXATA) ---
+    def _adicionar_paragrafo_quebravel(self, texto_paragrafo, is_continuacao=False):
         self.classe_pagina_atual = 'pagina'
         if not self.conteudo_pagina_atual:
             self.conteudo_pagina_atual.append(self.classe_pagina_atual)
 
         texto_restante = texto_paragrafo.strip()
-        is_continuacao = False
+        # A linha "is_continuacao = False" foi removida daqui. 
+        # Agora usamos o argumento que foi passado.
 
         while texto_restante:
+            # Garante que pelo menos 2 linhas caibam
             if self.altura_restante < ALTURA_LINHA_TEXTO * 2:
                 self._nova_pagina()
                 is_continuacao = True
                 continue
 
-            linhas_que_cabem = math.floor(self.altura_restante / ALTURA_LINHA_TEXTO)
-            caracteres_que_cabem = linhas_que_cabem * CARACTERES_POR_LINHA
+            # Mede a altura *exata* do texto restante
+            altura_total_texto_restante = self._calcular_altura_paragrafo(texto_restante, is_continuacao)
             
-            if not is_continuacao:
-                caracteres_que_cabem -= 10 
-
-            texto_para_pagina_atual: str
-            
-            if len(texto_restante) > caracteres_que_cabem:
-                ponto_quebra = texto_restante.rfind(' ', 0, caracteres_que_cabem)
-                if ponto_quebra == -1 or ponto_quebra < caracteres_que_cabem * 0.8:
-                    ponto_quebra = caracteres_que_cabem
-                
-                texto_para_pagina_atual = texto_restante[:ponto_quebra].rstrip()
-                texto_restante = texto_restante[ponto_quebra:].lstrip()
-            else:
-                texto_para_pagina_atual = texto_restante
+            # Verifica se o bloco inteiro cabe
+            if altura_total_texto_restante <= self.altura_restante:
+                # Sim, cabe. Adiciona tudo e zera.
+                base_class = "corpo-texto" if not is_continuacao else "paragrafo-continuado"
+                self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_restante}</p>')
+                self.altura_restante -= altura_total_texto_restante
                 texto_restante = ""
-
-            base_class = "corpo-texto" if not is_continuacao else "paragrafo-continuado"
-            self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_para_pagina_atual}</p>')
             
-            altura_consumida = math.ceil(len(texto_para_pagina_atual) / CARACTERES_POR_LINHA) * ALTURA_LINHA_TEXTO
-            self.altura_restante -= altura_consumida
+            else:
+                # Não cabe. Precisamos quebrar o texto.
+                # Encontrar o ponto de quebra exato (palavra por palavra)
+                
+                palavras_paragrafo = texto_restante.split()
+                texto_para_pagina_atual = ""
+                indice_quebra = 0
+                
+                for i, palavra in enumerate(palavras_paragrafo):
+                    # Testa adicionar a palavra
+                    texto_teste = texto_para_pagina_atual + " " + palavra if texto_para_pagina_atual else palavra
+                    
+                    # Mede o texto *com* a nova palavra
+                    altura_teste = self._calcular_altura_paragrafo(texto_teste, is_continuacao)
+                    
+                    if altura_teste > self.altura_restante:
+                        # A palavra 'palavra' não coube. O ponto de quebra é ANTES dela (no 'i').
+                        indice_quebra = i
+                        break
+                    else:
+                        # A palavra coube, adiciona ela
+                        texto_para_pagina_atual = texto_teste
+                
+                # Se o loop terminou e indice_quebra==0, o texto todo coube
+                # (Isso não deve acontecer por causa do 'if' externo, mas é um fallback)
+                if indice_quebra == 0 and texto_para_pagina_atual:
+                     indice_quebra = len(palavras_paragrafo) # Todas as palavras couberam
+
+                # --- CASO ESPECIAL: PALAVRA ÚNICA LONGA DEMAIS (o "AAAA...") ---
+                if indice_quebra == 0 and len(palavras_paragrafo) > 0:
+                    # A *primeira palavra* (palavras_paragrafo[0]) já é maior que a página inteira.
+                    # Precisamos quebrar a *palavra* (brute force).
+                    
+                    palavra_longa = palavras_paragrafo[0]
+                    
+                    # Quantos caracteres cabem na primeira linha (com/sem recuo)
+                    largura_disp_linha1 = self.LARGURA_CONTEUDO_PX
+                    if not is_continuacao:
+                        largura_disp_linha1 -= self.RECUO_PRIMEIRA_LINHA_PX
+                    chars_na_linha1 = max(1, int(largura_disp_linha1 / self.LARGURA_CHAR_MEDIO_PX))
+                    
+                    # Quantos caracteres cabem nas linhas seguintes
+                    chars_por_linha_normal = max(1, int(self.LARGURA_CONTEUDO_PX / self.LARGURA_CHAR_MEDIO_PX))
+                    
+                    # Quantas linhas temos (tirando a primeira)
+                    linhas_restantes = math.floor((self.altura_restante - ALTURA_LINHA_TEXTO) / ALTURA_LINHA_TEXTO)
+                    
+                    # Quantos caracteres cabem no total de linhas disponíveis
+                    total_chars_que_cabem = chars_na_linha1 + (linhas_restantes * chars_por_linha_normal)
+                    
+                    ponto_quebra_char = total_chars_que_cabem
+                    texto_para_pagina_atual = palavra_longa[:ponto_quebra_char] # Não hifeniza, só quebra
+                    texto_restante = palavra_longa[ponto_quebra_char:] + " " + " ".join(palavras_paragrafo[1:])
+                    
+                else:
+                    # Quebra normal (entre palavras)
+                    texto_para_pagina_atual = " ".join(palavras_paragrafo[:indice_quebra])
+                    texto_restante = " ".join(palavras_paragrafo[indice_quebra:])
+                
+                # --- FIM DA LÓGICA DE QUEBRA ---
+
+                base_class = "corpo-texto" if not is_continuacao else "paragrafo-continuado"
+                self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_para_pagina_atual}</p>')
+                
+                altura_consumida = self._calcular_altura_paragrafo(texto_para_pagina_atual, is_continuacao)
+                self.altura_restante -= altura_consumida
             
             if texto_restante:
                 self._nova_pagina()
                 is_continuacao = True
 
     def _renderizar_cabecalho_artigo_html(self):
+        # ... (código idêntico) ...
         autores_html = ", ".join([a.nome_completo for a in self.doc_abnt.autores])
         self._adicionar_elemento_bloco(f'<p style="text-align: center;"><strong>{self.doc_abnt.titulo.upper()}</strong></p><br>', ALTURA_LINHA_TEXTO * 2)
         self._adicionar_elemento_bloco(f'<p style="text-align: center;">{autores_html}</p><br>', ALTURA_LINHA_TEXTO * 2)
         self._adicionar_elemento_bloco(f'<p><strong>Resumo</strong></p>', ALTURA_LINHA_TEXTO)
         self._adicionar_paragrafo_quebravel(self.doc_abnt.resumo)
         self._adicionar_elemento_bloco(f'<br><p><strong>Palavras-chave:</strong> {self.doc_abnt.palavras_chave.replace(";", ".")}.</p>', ALTURA_LINHA_TEXTO * 2)
+
 
     def gerar_html(self) -> str:
         self.paginas_html = []
@@ -213,12 +398,15 @@ class GeradorHTMLPreview:
                 top: 1.5cm; right: 2cm; font-size: 12pt;
             }
             h1 { font-size: 12pt; font-weight: bold; text-transform: uppercase; margin-top: 1em; margin-bottom: 1em; }
+            
+            /* --- 6. CSS Corrigido (sem quebra brutal) --- */
             p { 
                 margin: 0; padding: 0; 
-                overflow-wrap: break-word; /* Padrão */
+                overflow-wrap: break-word; /* Padrão (quebra em espaços) */
                 word-wrap: break-word;     /* Compatibilidade */
-                word-break: break-all;     /* Força a quebra de palavras longas */
             }
+            /* --- FIM DA CORREÇÃO --- */
+            
             p.corpo-texto { text-align: justify; text-indent: 1.25cm; }
             p.paragrafo-continuado { text-align: justify; text-indent: 0; }
             .paragrafo-quebrado { text-align-last: justify; }
@@ -290,6 +478,7 @@ class GeradorHTMLPreview:
         return f"<!DOCTYPE html><html><head><meta charset='UTF-8'>{html_style}</head><body>{''.join(self.paginas_html)}</body></html>"
 
     def _renderizar_cabecalho_capa_html(self, cfg):
+        # ... (código idêntico) ...
         posicao = cfg.posicao_brasao
         instituicao_html = f'<p class="bloco-texto-capa"><strong>{cfg.instituicao.upper()}</strong></p>'
         if posicao == "Nenhum": return f'<div class="brasao-container">{instituicao_html}</div>'
@@ -330,34 +519,65 @@ class GeradorHTMLPreview:
             titulo_texto = f"{numero_completo} {no_filho.titulo.upper() if nivel == 1 and not self.is_artigo else no_filho.titulo}"
             id_ancora = f"secao-{numero_completo.replace('.', '-')}"
             self._adicionar_elemento_bloco(f"<h1 id='{id_ancora}'>{titulo_texto}</h1>", ALTURA_TITULO_SECAO)
+            
             if no_filho.conteudo:
                 padrao = r"\{\{(Tabela|Figura|Formula):([^}]+)\}\}"
                 partes = re.split(padrao, no_filho.conteudo)
+                
+                # Controla se o próximo texto é uma continuação (sem recuo)
+                is_continuacao_paragrafo = False
+                
                 for k, parte in enumerate(partes):
-                    if k % 3 == 0:
+                    if k % 3 == 0: # É texto
                         if parte.strip():
                             paragrafos = parte.strip().split('\n')
-                            for paragrafo_texto in paragrafos:
-                                if paragrafo_texto.strip(): self._adicionar_paragrafo_quebravel(paragrafo_texto)
-                    elif k % 3 == 1:
+                            for j, paragrafo_texto in enumerate(paragrafos):
+                                if paragrafo_texto.strip():
+                                    # Se j > 0, é um novo parágrafo (quebra de linha intencional)
+                                    # Se is_continuacao_paragrafo é True, é o texto após uma quebra de página
+                                    eh_novo_paragrafo = (j > 0 or not is_continuacao_paragrafo)
+                                    self._adicionar_paragrafo_quebravel(paragrafo_texto, is_continuacao=(not eh_novo_paragrafo))
+                                    # O *próximo* pedaço de texto *depois deste* será uma continuação
+                                    is_continuacao_paragrafo = True 
+                    elif k % 3 == 1: # É um bloco (Figura, etc.)
                         tipo, titulo = parte, partes[k+1]
+                        
                         if tipo == "Tabela":
                             obj = next((t for t in self.doc_abnt.banco_tabelas if t.titulo == titulo), None)
                             if obj:
                                 self.contador_tabelas += 1; obj.numero = self.contador_tabelas
                                 altura = (len(obj.dados) * ALTURA_LINHA_TABELA) + (ALTURA_LEGENDA * 2) if obj.dados else (ALTURA_LEGENDA * 2)
                                 self._adicionar_elemento_bloco(self._renderizar_tabela_html(obj), altura)
+                                
                         elif tipo == "Figura":
                             obj = next((f for f in self.doc_abnt.banco_figuras if f.titulo == titulo), None)
                             if obj:
                                 self.contador_figuras += 1; obj.numero = self.contador_figuras
-                                altura = (obj.largura_cm / 16 * 9) + (ALTURA_LEGENDA * 2)
-                                self._adicionar_elemento_bloco(self._renderizar_figura_html(obj), altura)
+                                caminho_img = obj.caminho_processado or obj.caminho_original
+                                aspect_ratio = self._get_image_aspect_ratio(caminho_img) 
+                                altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                altura_total_bloco = altura_imagem_cm + (ALTURA_LEGENDA * 2)
+                                self._adicionar_elemento_bloco(self._renderizar_figura_html(obj), altura_total_bloco)
+                                
                         elif tipo == "Formula":
                             obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo), None)
                             if obj:
                                 self.contador_formulas += 1; obj.numero = self.contador_formulas
-                                self._adicionar_elemento_bloco(self._renderizar_formula_html(obj), ALTURA_FORMULA_ESTIMADA + ALTURA_LEGENDA)
+                                
+                                caminho_imagem = obj.caminho_svg
+                                if not caminho_imagem or not os.path.exists(caminho_imagem):
+                                    caminho_imagem = obj.caminho_processado_png
+                                
+                                aspect_ratio = self._get_svg_aspect_ratio(caminho_imagem)
+                                altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                altura_imagem_cm += 0.5 
+                                altura_total_bloco = altura_imagem_cm + ALTURA_LEGENDA
+                                
+                                self._adicionar_elemento_bloco(self._renderizar_formula_html(obj), altura_total_bloco)
+                        
+                        # Um bloco sempre força o próximo texto a ser um novo parágrafo
+                        is_continuacao_paragrafo = False
+                                
             self._renderizar_secoes_recursivamente_html(no_filho, f"{numero_completo}.")
     
     def _renderizar_capa_html(self, cfg, autores_html):
@@ -397,11 +617,14 @@ class GeradorHTMLPreview:
         html = f'<div><p class="legenda">Tabela {tabela.numero} – {tabela.titulo}</p><table class="{classe_css}" align="center">'
         if tabela.dados:
             html += '<thead><tr>'
-            for header in tabela.dados[0]: html += f'<th>{header}</th>'
+            # Centraliza o cabeçalho
+            for header in tabela.dados[0]: html += f'<th style="text-align: center;">{header}</th>'
             html += '</tr></thead><tbody>'
             for row in tabela.dados[1:]:
                 html += '<tr>'
-                for cell in row: html += f'<td>{cell}</td>'
+                # Centraliza o conteúdo (ou não) baseado na opção
+                align_style = "text-align: center;" if tabela.centralizar_conteudo else "text-align: left;"
+                for cell in row: html += f'<td style="{align_style}">{cell}</td>'
                 html += '</tr>'
             html += '</tbody>'
         html += '</table>'
