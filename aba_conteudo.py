@@ -1,19 +1,42 @@
 # aba_conteudo.py
 # Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
-# para melhorar a usabilidade e o espaço de edição.
+# para melhorar a usabilidade e o espaço de edição, incluindo Menu de Contexto
+# no editor para inserção rápida de ativos.
 
 import re
 from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtWidgets import (QWidget, QLabel, QTextEdit, QPushButton, QListWidget, QCheckBox,
                                QVBoxLayout, QHBoxLayout, QMessageBox, QTreeWidget,
                                QTreeWidgetItem, QInputDialog, QAbstractItemView, QLineEdit, QTabWidget,
-                               QSplitter) # <-- 1. Importar QSplitter
+                               QSplitter, QToolButton)
 
 from documento import Capitulo, Tabela, Figura, Formula
 from dialogo_tabela import TabelaDialog
 from dialogo_figura import DialogoFigura
 from DialogoFormula import DialogoFormula
 
+# --- CLASSE ADICIONAL PARA SOBRESCREVER O MENU DE CONTEXTO (CORRIGIDA) ---
+class EditorConteudo(QTextEdit):
+    """
+    QTextEdit modificado para criar o menu de contexto padrão,
+    adicionar as ações customizadas de inserção e exibi-lo.
+    """
+    def __init__(self, aba_conteudo_parent, parent=None):
+        super().__init__(parent)
+        self.aba_conteudo_parent = aba_conteudo_parent # Referência ao AbaConteudo
+    
+    def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
+        # 1. Cria o menu padrão do QTextEdit (contém Copiar, Colar, Selecionar Tudo, etc.)
+        menu = self.createStandardContextMenu()
+        
+        # 2. Chama o método no AbaConteudo para adicionar as ações customizadas
+        # (Passamos o menu nativo para que ele seja modificado)
+        self.aba_conteudo_parent._adicionar_acoes_menu_contexto(menu)
+        
+        # 3. Executa o menu combinado na posição do clique
+        menu.exec(event.globalPos())
+
+# --- CLASSE ARVORE CONTEUDO ---
 class ArvoreConteudo(QTreeWidget):
     estruturaAlterada = QtCore.Signal()
     def __init__(self, parent=None):
@@ -29,21 +52,48 @@ class ArvoreConteudo(QTreeWidget):
         else:
             event.ignore()
 
+# --- CLASSE ABA CONTEUDO ---
 class AbaConteudo(QWidget):
     def __init__(self, documento, parent=None):
         super().__init__(parent)
         self.documento = documento
         self._carregando_capitulo = False
         self._build_ui()
+        self._apply_styles()
+
+    def _apply_styles(self):
+        """Aplica estilos CSS para os QToolButton da barra de formatação."""
+        style = """
+        QToolButton {
+            border: 1px solid transparent; 
+            padding: 5px;
+            background-color: transparent;
+            min-width: 32px; 
+            min-height: 32px; 
+            border-radius: 4px; 
+        }
+        QToolButton:hover {
+            background-color: #e0e0e0; 
+            border: 1px solid #c0c0c0; 
+        }
+        QToolButton:pressed {
+            background-color: #d0d0d0; 
+            border: 1px solid #a0a0a0;
+        }
+        QToolButton:disabled {
+            opacity: 0.6; 
+        }
+        """
+        self.setStyleSheet(style)
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10) # Adiciona uma margem
+        layout.setContentsMargins(10, 10, 10, 10) 
         
-        # --- INÍCIO DA MUDANÇA: O painel esquerdo agora é um Splitter ---
+        # --- PAINEL ESQUERDO (Splitter Vertical) ---
         
         left_splitter = QSplitter(QtCore.Qt.Orientation.Vertical)
-        left_splitter.setMaximumWidth(350) # O painel esquerdo todo continua fino
+        left_splitter.setMaximumWidth(350)
 
         # --- 1. PAINEL DO TOPO-ESQUERDO (Árvore de Capítulos) ---
         top_left_widget = QWidget()
@@ -85,11 +135,9 @@ class AbaConteudo(QWidget):
         btn_del.clicked.connect(self._remover_topico)
         left_layout.addLayout(btn_layout)
         
-        # Adiciona o painel da árvore ao splitter
         left_splitter.addWidget(top_left_widget) 
         
         # --- 2. PAINEL DA BASE-ESQUERDA (Bancos de Ativos) ---
-        # (Toda a lógica do QTabWidget foi movida para cá)
         
         self.lista_tabelas = QListWidget()
         self.lista_figuras = QListWidget()
@@ -123,7 +171,7 @@ class AbaConteudo(QWidget):
         btn_add_tabela.clicked.connect(self._adicionar_tabela)
         btn_edit_tabela.clicked.connect(self._editar_tabela)
         btn_del_tabela.clicked.connect(self._remover_tabela)
-        btn_ins_tabela.clicked.connect(self._inserir_marcador_tabela)
+        btn_ins_tabela.clicked.connect(lambda: self._inserir_marcador_generico("Tabela", self.lista_tabelas.currentItem().text()) if self.lista_tabelas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma tabela do banco para inserir."))
         
         # Cria o widget para a aba "Figuras"
         figuras_widget = QWidget()
@@ -151,7 +199,7 @@ class AbaConteudo(QWidget):
         btn_add_figura.clicked.connect(self._adicionar_figura)
         btn_edit_figura.clicked.connect(self._editar_figura)
         btn_del_figura.clicked.connect(self._remover_figura)
-        btn_ins_figura.clicked.connect(self._inserir_marcador_figura)
+        btn_ins_figura.clicked.connect(lambda: self._inserir_marcador_generico("Figura", self.lista_figuras.currentItem().text()) if self.lista_figuras.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma figura do banco para inserir."))
 
         # Cria o widget para a aba "Fórmulas"
         formulas_widget = QWidget()
@@ -179,27 +227,18 @@ class AbaConteudo(QWidget):
         btn_add_formula.clicked.connect(self._adicionar_formula)
         btn_edit_formula.clicked.connect(self._editar_formula)
         btn_del_formula.clicked.connect(self._remover_formula)
-        btn_ins_formula.clicked.connect(self._inserir_marcador_formula)
+        btn_ins_formula.clicked.connect(lambda: self._inserir_marcador_generico("Formula", self.lista_formulas.currentItem().text()) if self.lista_formulas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma fórmula do banco para inserir."))
         
         # Adiciona os widgets criados como abas no QTabWidget
         self.bancos_tabs.addTab(tabelas_widget, "Tabelas")
         self.bancos_tabs.addTab(figuras_widget, "Figuras")
         self.bancos_tabs.addTab(formulas_widget, "Fórmulas")
 
-        # Adiciona o painel de bancos ao splitter
         left_splitter.addWidget(self.bancos_tabs)
-        
-        # Define os tamanhos iniciais (ex: 60% para a árvore, 40% para os bancos)
         left_splitter.setSizes([400, 300]) 
-        
-        # Adiciona o splitter (painel esquerdo) ao layout principal
         layout.addWidget(left_splitter)
 
-        # --- FIM DA MUDANÇA ---
-
-
         # --- 3. PAINEL DIREITO (Editor de Texto) ---
-        # (Agora muito mais simples, só tem o editor)
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         
@@ -209,34 +248,103 @@ class AbaConteudo(QWidget):
         format_toolbar = QHBoxLayout()
         format_toolbar.addWidget(QLabel("Formatação:"))
         
-        btn_quebra_pagina = QPushButton("Inserir Quebra de Página")
-        btn_quebra_pagina.setProperty("cssClass", "utility")
-        btn_quebra_pagina.clicked.connect(self._inserir_quebra_pagina)
-        format_toolbar.addWidget(btn_quebra_pagina)
+        # BOTÕES DE ÍCONE (QToolButton)
+        self.btn_quebra_pagina = QToolButton()
+        self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break.png")) 
+        self.btn_quebra_pagina.setToolTip("Inserir Quebra de Página (Ctrl+Enter)")
+        self.btn_quebra_pagina.clicked.connect(self._inserir_quebra_pagina)
+        format_toolbar.addWidget(self.btn_quebra_pagina)
         
-        btn_pagina_em_branco = QPushButton("Inserir Página em Branco")
-        btn_pagina_em_branco.setProperty("cssClass", "utility")
-        btn_pagina_em_branco.clicked.connect(self._inserir_pagina_em_branco)
-        format_toolbar.addWidget(btn_pagina_em_branco)
+        self.btn_pagina_em_branco = QToolButton()
+        self.btn_pagina_em_branco.setIcon(QtGui.QIcon("assets/icons/blank_page.png"))
+        self.btn_pagina_em_branco.setToolTip("Inserir Página em Branco")
+        self.btn_pagina_em_branco.clicked.connect(self._inserir_pagina_em_branco)
+        format_toolbar.addWidget(self.btn_pagina_em_branco)
         
         format_toolbar.addStretch()
         
-        self.editor_capitulo = QTextEdit()
+        # --- MUDANÇA: USAR NOVO EDITOR COM REFERÊNCIA AO PARENT ---
+        self.editor_capitulo = EditorConteudo(aba_conteudo_parent=self) # <--- MUDANÇA AQUI
         self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
+        # O menu de contexto agora é tratado internamente pelo EditorConteudo
+        # ---------------------------------
 
         right_layout.addWidget(self.label_capitulo_atual)
         right_layout.addLayout(format_toolbar)
-        right_layout.addWidget(self.editor_capitulo, 1) # O '1' faz ele tomar todo o espaço
+        right_layout.addWidget(self.editor_capitulo, 1) 
         
-        # Adiciona o painel direito ao layout principal
-        # O '1' aqui faz com que o painel direito seja maior que o esquerdo
         layout.addWidget(right_panel, 1) 
         
-        # --- Fim do Bloco do Painel Direito ---
-
         self._popular_arvore()
         if self.arvore_capitulos.topLevelItemCount() > 0:
             self.arvore_capitulos.setCurrentItem(self.arvore_capitulos.topLevelItem(0))
+
+    # --- NOVOS MÉTODOS DE MENU DE CONTEXTO (MODIFICADOS) ---
+
+    @QtCore.Slot(QtWidgets.QMenu)
+    def _adicionar_acoes_menu_contexto(self, menu: QtWidgets.QMenu): # Aceita o menu nativo
+        """Adiciona as ações customizadas (Inserir Tabela, Figura, Formula) ao menu nativo."""
+        
+        # Adiciona um separador ANTES das nossas opções, para separá-las das nativas
+        menu.addSeparator() 
+
+        # --- 1. Submenu de Tabelas ---
+        menu_tabelas = menu.addMenu("Inserir Tabela")
+        self._adicionar_submenus_banco(
+            menu=menu_tabelas, 
+            banco=self.documento.banco_tabelas, 
+            tipo="Tabela",
+            inserir_slot=self._inserir_marcador_generico,
+            criar_slot=self._adicionar_tabela
+        )
+
+        # --- 2. Submenu de Figuras ---
+        menu_figuras = menu.addMenu("Inserir Figura")
+        self._adicionar_submenus_banco(
+            menu=menu_figuras, 
+            banco=self.documento.banco_figuras, 
+            tipo="Figura",
+            inserir_slot=self._inserir_marcador_generico,
+            criar_slot=self._adicionar_figura
+        )
+
+        # --- 3. Submenu de Fórmulas ---
+        menu_formulas = menu.addMenu("Inserir Fórmula")
+        self._adicionar_submenus_banco(
+            menu=menu_formulas, 
+            banco=self.documento.banco_formulas, 
+            tipo="Formula",
+            inserir_slot=self._inserir_marcador_generico,
+            criar_slot=self._adicionar_formula
+        )
+
+
+    def _adicionar_submenus_banco(self, menu: QtWidgets.QMenu, banco: list, tipo: str, inserir_slot, criar_slot):
+        """Função auxiliar para popular submenus com itens do banco e opção 'Novo'."""
+
+        # 1. Opção para Criar Novo (sempre no topo)
+        acao_novo = menu.addAction(f"Criar Nova {tipo}...")
+        acao_novo.triggered.connect(criar_slot)
+        
+        if banco:
+            menu.addSeparator()
+
+            # 2. Opções para Inserir Itens Existentes
+            for item in banco:
+                # Usa 'titulo' para Tabelas/Figuras e 'legenda' para Fórmulas
+                nome = getattr(item, 'titulo', None) or getattr(item, 'legenda', None)
+                
+                if nome:
+                    acao_inserir = menu.addAction(f"Inserir: {nome}")
+                    # Conecta a função genérica de inserção com o tipo e nome do item
+                    acao_inserir.triggered.connect(lambda checked, n=nome, t=tipo: inserir_slot(t, n))
+    
+    @QtCore.Slot(str, str)
+    def _inserir_marcador_generico(self, tipo: str, nome: str):
+        """Insere um marcador de referência genérico no editor."""
+        self.editor_capitulo.insertPlainText(f"\n{{{{{tipo}:{nome}}}}}\n")
+
+    # --- FIM DOS MÉTODOS DE MENU DE CONTEXTO ---
 
     @QtCore.Slot()
     def atualizar_bancos_visuais(self):
@@ -326,6 +434,8 @@ class AbaConteudo(QWidget):
         capitulo = self._get_capitulo_selecionado()
         elementos_habilitados = True if capitulo else False
         self.bancos_tabs.setEnabled(elementos_habilitados)
+        self.btn_quebra_pagina.setEnabled(elementos_habilitados)
+        self.btn_pagina_em_branco.setEnabled(elementos_habilitados)
         
         if not capitulo:
             self.editor_capitulo.clear()
@@ -343,8 +453,11 @@ class AbaConteudo(QWidget):
     def _adicionar_tabela(self):
         dialog = TabelaDialog(parent=self)
         if dialog.exec():
-            self.documento.banco_tabelas.append(dialog.get_dados_tabela())
+            nova_tabela = dialog.get_dados_tabela()
+            self.documento.banco_tabelas.append(nova_tabela)
             self.atualizar_bancos_visuais()
+            if nova_tabela.titulo:
+                self._inserir_marcador_generico("Tabela", nova_tabela.titulo)
 
     @QtCore.Slot()
     def _adicionar_figura(self):
@@ -354,6 +467,8 @@ class AbaConteudo(QWidget):
             if nova_figura and nova_figura.caminho_processado:
                 self.documento.banco_figuras.append(nova_figura)
                 self.atualizar_bancos_visuais()
+                if nova_figura.titulo:
+                    self._inserir_marcador_generico("Figura", nova_figura.titulo)
 
     @QtCore.Slot()
     def _adicionar_formula(self):
@@ -362,34 +477,9 @@ class AbaConteudo(QWidget):
             nova_formula = dialog.get_dados_formula()
             self.documento.banco_formulas.append(nova_formula)
             self.atualizar_bancos_visuais()
-
-    @QtCore.Slot()
-    def _inserir_marcador_tabela(self):
-        item_selecionado = self.lista_tabelas.currentItem()
-        if not item_selecionado:
-            QMessageBox.warning(self, "Atenção", "Selecione uma tabela do banco para inserir.")
-            return
-        marcador = f"\n{{{{Tabela:{item_selecionado.text()}}}}}\n"
-        self.editor_capitulo.insertPlainText(marcador)
-
-    @QtCore.Slot()
-    def _inserir_marcador_figura(self):
-        item_selecionado = self.lista_figuras.currentItem()
-        if not item_selecionado:
-            QMessageBox.warning(self, "Atenção", "Selecione uma figura do banco para inserir.")
-            return
-        marcador = f"\n{{{{Figura:{item_selecionado.text()}}}}}\n"
-        self.editor_capitulo.insertPlainText(marcador)
-
-    @QtCore.Slot()
-    def _inserir_marcador_formula(self):
-        item_selecionado = self.lista_formulas.currentItem()
-        if not item_selecionado:
-            QMessageBox.warning(self, "Atenção", "Selecione uma fórmula do banco para inserir.")
-            return
-        marcador = f"\n{{{{Formula:{item_selecionado.text()}}}}}\n"
-        self.editor_capitulo.insertPlainText(marcador)
-
+            if nova_formula.legenda:
+                self._inserir_marcador_generico("Formula", nova_formula.legenda)
+                
     def _get_capitulo_selecionado(self) -> Capitulo | None:
         item = self.arvore_capitulos.currentItem()
         return item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
