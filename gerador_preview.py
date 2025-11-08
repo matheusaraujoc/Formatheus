@@ -1,6 +1,6 @@
 # gerador_preview.py
 # Descrição: Versão com lógica de quebra de palavras longas (word-break)
-# para corrigir o vazamento de texto contínuo.
+# e CSS de alinhamento de brasão corrigido.
 
 import os
 import re
@@ -61,7 +61,6 @@ class GeradorHTMLPreview:
             except:
                 return ImageFont.load_default()
 
-    # --- 1. FUNÇÃO DE CÁLCULO DE ALTURA (ATUALIZADA) ---
     def _calcular_altura_paragrafo(self, texto: str, is_continuacao=False) -> float:
         """
         Calcula a altura real (em cm) que um parágrafo ocupará,
@@ -81,25 +80,17 @@ class GeradorHTMLPreview:
             except:
                 largura_palavra = len(palavra) * (self.LARGURA_CHAR_MEDIO_PX * 0.9) # fallback
 
-            # Tenta adicionar a palavra na linha atual
             if (largura_linha_atual == (self.RECUO_PRIMEIRA_LINHA_PX if not is_continuacao else 0)) or \
                (largura_linha_atual + self.LARGURA_ESPACO_PX + largura_palavra) <= self.LARGURA_CONTEUDO_PX:
-                # Sim, cabe. Adiciona.
                 largura_linha_atual += (self.LARGURA_ESPACO_PX if largura_linha_atual > 0 else 0) + largura_palavra
             
             else:
-                # Não cabe, quebra a linha.
                 linhas += 1
-                largura_linha_atual = largura_palavra # Palavra começa na nova linha
+                largura_linha_atual = largura_palavra 
             
-            # --- INÍCIO DA CORREÇÃO ---
-            # Se a palavra que acabamos de adicionar é TÃO LONGA que ainda
-            # ultrapassa a largura da linha, quebramos ela (o "AAAA..." caso)
             while largura_linha_atual > self.LARGURA_CONTEUDO_PX:
-                # A palavra ocupou a linha inteira, mas ainda "sobrou"
                 linhas += 1
                 largura_linha_atual -= self.LARGURA_CONTEUDO_PX
-            # --- FIM DA CORREÇÃO ---
 
         return linhas * ALTURA_LINHA_TEXTO
 
@@ -195,15 +186,10 @@ class GeradorHTMLPreview:
                                 paragrafos = parte.strip().split('\n')
                                 for j, paragrafo_texto in enumerate(paragrafos):
                                     if paragrafo_texto.strip():
-                                        # Se for o primeiro parágrafo, usa o estado de continuação
                                         simular_paragrafo_quebravel(paragrafo_texto, is_continuacao_paragrafo)
-                                        is_continuacao_paragrafo = False # Reseta para os próximos
-                                    # Se o parágrafo terminar, o próximo (após uma figura, etc.)
-                                    # será um novo parágrafo (com recuo).
+                                        is_continuacao_paragrafo = False 
                                     is_continuacao_paragrafo = False 
                             else:
-                                # Se a parte é vazia (ex: {{Figura}} no início),
-                                # o texto seguinte NÃO é uma continuação.
                                 is_continuacao_paragrafo = False
                         elif k % 3 == 1:
                             tipo, titulo = parte, partes[k+1]
@@ -223,7 +209,6 @@ class GeradorHTMLPreview:
                                     aspect_ratio = self._get_svg_aspect_ratio(obj.caminho_svg or obj.caminho_processado_png)
                                     altura_imagem_cm = obj.largura_cm * aspect_ratio
                                     simular_adicao_bloco(altura_imagem_cm + ALTURA_LEGENDA + 0.5) 
-                            # Um bloco (figura, etc.) força o próximo texto a ser um novo parágrafo
                             is_continuacao_paragrafo = False
                 coletar_recursivo(no_filho, f"{numero_completo}.")
         
@@ -255,95 +240,63 @@ class GeradorHTMLPreview:
         self.conteudo_pagina_atual.append(html)
         self.altura_restante -= altura_necessaria
 
-    # --- 5. FUNÇÃO DE RENDERIZAÇÃO ATUALIZADA (LÓGICA DE QUEBRA EXATA) ---
     def _adicionar_paragrafo_quebravel(self, texto_paragrafo, is_continuacao=False):
         self.classe_pagina_atual = 'pagina'
         if not self.conteudo_pagina_atual:
             self.conteudo_pagina_atual.append(self.classe_pagina_atual)
 
         texto_restante = texto_paragrafo.strip()
-        # A linha "is_continuacao = False" foi removida daqui. 
-        # Agora usamos o argumento que foi passado.
-
+        
         while texto_restante:
-            # Garante que pelo menos 2 linhas caibam
             if self.altura_restante < ALTURA_LINHA_TEXTO * 2:
                 self._nova_pagina()
                 is_continuacao = True
                 continue
 
-            # Mede a altura *exata* do texto restante
             altura_total_texto_restante = self._calcular_altura_paragrafo(texto_restante, is_continuacao)
             
-            # Verifica se o bloco inteiro cabe
             if altura_total_texto_restante <= self.altura_restante:
-                # Sim, cabe. Adiciona tudo e zera.
                 base_class = "corpo-texto" if not is_continuacao else "paragrafo-continuado"
                 self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_restante}</p>')
                 self.altura_restante -= altura_total_texto_restante
                 texto_restante = ""
             
             else:
-                # Não cabe. Precisamos quebrar o texto.
-                # Encontrar o ponto de quebra exato (palavra por palavra)
-                
                 palavras_paragrafo = texto_restante.split()
                 texto_para_pagina_atual = ""
                 indice_quebra = 0
                 
                 for i, palavra in enumerate(palavras_paragrafo):
-                    # Testa adicionar a palavra
                     texto_teste = texto_para_pagina_atual + " " + palavra if texto_para_pagina_atual else palavra
-                    
-                    # Mede o texto *com* a nova palavra
                     altura_teste = self._calcular_altura_paragrafo(texto_teste, is_continuacao)
                     
                     if altura_teste > self.altura_restante:
-                        # A palavra 'palavra' não coube. O ponto de quebra é ANTES dela (no 'i').
                         indice_quebra = i
                         break
                     else:
-                        # A palavra coube, adiciona ela
                         texto_para_pagina_atual = texto_teste
                 
-                # Se o loop terminou e indice_quebra==0, o texto todo coube
-                # (Isso não deve acontecer por causa do 'if' externo, mas é um fallback)
                 if indice_quebra == 0 and texto_para_pagina_atual:
-                     indice_quebra = len(palavras_paragrafo) # Todas as palavras couberam
+                     indice_quebra = len(palavras_paragrafo)
 
-                # --- CASO ESPECIAL: PALAVRA ÚNICA LONGA DEMAIS (o "AAAA...") ---
                 if indice_quebra == 0 and len(palavras_paragrafo) > 0:
-                    # A *primeira palavra* (palavras_paragrafo[0]) já é maior que a página inteira.
-                    # Precisamos quebrar a *palavra* (brute force).
-                    
                     palavra_longa = palavras_paragrafo[0]
-                    
-                    # Quantos caracteres cabem na primeira linha (com/sem recuo)
                     largura_disp_linha1 = self.LARGURA_CONTEUDO_PX
                     if not is_continuacao:
                         largura_disp_linha1 -= self.RECUO_PRIMEIRA_LINHA_PX
                     chars_na_linha1 = max(1, int(largura_disp_linha1 / self.LARGURA_CHAR_MEDIO_PX))
-                    
-                    # Quantos caracteres cabem nas linhas seguintes
                     chars_por_linha_normal = max(1, int(self.LARGURA_CONTEUDO_PX / self.LARGURA_CHAR_MEDIO_PX))
-                    
-                    # Quantas linhas temos (tirando a primeira)
                     linhas_restantes = math.floor((self.altura_restante - ALTURA_LINHA_TEXTO) / ALTURA_LINHA_TEXTO)
-                    
-                    # Quantos caracteres cabem no total de linhas disponíveis
                     total_chars_que_cabem = chars_na_linha1 + (linhas_restantes * chars_por_linha_normal)
                     
                     ponto_quebra_char = total_chars_que_cabem
-                    texto_para_pagina_atual = palavra_longa[:ponto_quebra_char] # Não hifeniza, só quebra
+                    texto_para_pagina_atual = palavra_longa[:ponto_quebra_char] 
                     texto_restante = palavra_longa[ponto_quebra_char:] + " " + " ".join(palavras_paragrafo[1:])
                     
                 else:
-                    # Quebra normal (entre palavras)
                     texto_para_pagina_atual = " ".join(palavras_paragrafo[:indice_quebra])
                     texto_restante = " ".join(palavras_paragrafo[indice_quebra:])
                 
-                # --- FIM DA LÓGICA DE QUEBRA ---
-
                 base_class = "corpo-texto" if not is_continuacao else "paragrafo-continuado"
                 self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_para_pagina_atual}</p>')
                 
@@ -355,14 +308,12 @@ class GeradorHTMLPreview:
                 is_continuacao = True
 
     def _renderizar_cabecalho_artigo_html(self):
-        # ... (código idêntico) ...
         autores_html = ", ".join([a.nome_completo for a in self.doc_abnt.autores])
         self._adicionar_elemento_bloco(f'<p style="text-align: center;"><strong>{self.doc_abnt.titulo.upper()}</strong></p><br>', ALTURA_LINHA_TEXTO * 2)
         self._adicionar_elemento_bloco(f'<p style="text-align: center;">{autores_html}</p><br>', ALTURA_LINHA_TEXTO * 2)
         self._adicionar_elemento_bloco(f'<p><strong>Resumo</strong></p>', ALTURA_LINHA_TEXTO)
         self._adicionar_paragrafo_quebravel(self.doc_abnt.resumo)
         self._adicionar_elemento_bloco(f'<br><p><strong>Palavras-chave:</strong> {self.doc_abnt.palavras_chave.replace(";", ".")}.</p>', ALTURA_LINHA_TEXTO * 2)
-
 
     def gerar_html(self) -> str:
         self.paginas_html = []
@@ -399,13 +350,11 @@ class GeradorHTMLPreview:
             }
             h1 { font-size: 12pt; font-weight: bold; text-transform: uppercase; margin-top: 1em; margin-bottom: 1em; }
             
-            /* --- 6. CSS Corrigido (sem quebra brutal) --- */
             p { 
                 margin: 0; padding: 0; 
                 overflow-wrap: break-word; /* Padrão (quebra em espaços) */
                 word-wrap: break-word;     /* Compatibilidade */
             }
-            /* --- FIM DA CORREÇÃO --- */
             
             p.corpo-texto { text-align: justify; text-indent: 1.25cm; }
             p.paragrafo-continuado { text-align: justify; text-indent: 0; }
@@ -435,16 +384,41 @@ class GeradorHTMLPreview:
             .sumario-nivel-2 { margin-left: 2em; } .sumario-nivel-3 { margin-left: 4em; }
             .brasao-container {
                 min-height: 4cm; margin-bottom: 1cm;
-                display: flex; flex-direction: column; justify-content: center;
+                display: flex; flex-direction: column; 
+                /* O 'justify-content' foi movido para as classes filhas */
             }
             .brasoes-lado-a-lado {
                 flex-direction: row; justify-content: space-between; align-items: center;
             }
             .brasoes-lado-a-lado .instituicao-central { flex-grow: 1; padding: 0 1cm; }
             .brasao-container img { display: inline-block; margin: 0; max-height: 3.5cm; }
-            .brasao-centralizado { text-align: center; }
-            .brasao-esquerda { align-self: flex-start; text-align: left; }
-            .brasao-direita { align-self: flex-end; text-align: right; }
+            
+            /* --- INÍCIO DA CORREÇÃO (ALINHAMENTO BRASÃO) --- */
+            /* 1. Alinha os *itens* (img, p) DENTRO do container flex */
+            .brasao-centralizado { 
+                justify-content: center; /* Alinha verticalmente (para o caso de só ter o <p>) */
+                align-items: center; /* Alinha horizontalmente */ 
+                text-align: center; /* Fallback para o <p> */
+            }
+            .brasao-esquerda { 
+                justify-content: center;
+                align-items: flex-start; /* Alinha horizontalmente à esquerda */ 
+                text-align: left;
+            }
+            .brasao-direita { 
+                justify-content: center;
+                align-items: flex-end; /* Alinha horizontalmente à direita */ 
+                text-align: right;
+            }
+
+            /* 2. Alinha o container *em relação à página* (que é display: flex) */
+            /* Seleciona o primeiro 'div' filho da capa (que é o .brasao-container) */
+            .pagina.capa > div:first-child {
+                align-self: stretch; /* Padrão: estica (bom para centralizado e lados) */
+            }
+            /* Estas regras não são mais necessárias se o .brasao-container já é flex */
+            /* --- FIM DA CORREÇÃO --- */
+            
         </style>
         """
         
@@ -477,40 +451,51 @@ class GeradorHTMLPreview:
 
         return f"<!DOCTYPE html><html><head><meta charset='UTF-8'>{html_style}</head><body>{''.join(self.paginas_html)}</body></html>"
 
+    # --- INÍCIO DA CORREÇÃO (HTML DO CABEÇALHO) ---
     def _renderizar_cabecalho_capa_html(self, cfg):
-        # ... (código idêntico) ...
         posicao = cfg.posicao_brasao
         instituicao_html = f'<p class="bloco-texto-capa"><strong>{cfg.instituicao.upper()}</strong></p>'
-        if posicao == "Nenhum": return f'<div class="brasao-container">{instituicao_html}</div>'
-        if posicao == "Lados (Esquerdo e Direito)":
-            html_esq = "<div></div>"
+
+        # --- Caso 1: Nenhum (Funciona) ---
+        if posicao == "Nenhum": 
+            return f'<div class="brasao-container brasao-centralizado">{instituicao_html}</div>'
+
+        # --- Caso 2: Acima do Nome (Funciona) ---
+        if posicao == "Acima do Nome":
+            brasao_html = ""
+            classe_css_container = "brasao-centralizado" # Classe no container
+            if cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
+                url = f"file:///{os.path.abspath(cfg.caminho_brasao_esquerdo_processado).replace(os.path.sep, '/')}"
+                brasao_html = f'<img src="{url}" style="width:{cfg.tamanho_brasao_esquerdo_cm}cm; margin-bottom: 1cm;"><br>'
+            
+            # A classe .brasao-centralizado no container e o text-align: center no <p> (padrão da capa) resolvem
+            return f'<div class="brasao-container {classe_css_container}"><p class="bloco-texto-capa">{brasao_html}<strong>{cfg.instituicao.upper()}</strong></p></div>'
+
+        # --- INÍCIO DA CORREÇÃO ---
+        # --- Casos 3, 4, 5: Lados, Apenas Esquerdo, Apenas Direito ---
+        # Todos usam o layout 'brasoes-lado-a-lado', mas com divs vazias.
+
+        html_esq = "<div></div>" # Placeholder (para manter o alinhamento)
+        html_dir = "<div></div>" # Placeholder (para manter o alinhamento)
+        
+        # Preenche o lado esquerdo se for "Lados" OU "Apenas Esquerdo"
+        if (posicao == "Lados (Esquerdo e Direito)" or posicao == "Apenas Esquerdo"):
             if cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
                 url_esq = f"file:///{os.path.abspath(cfg.caminho_brasao_esquerdo_processado).replace(os.path.sep, '/')}"
                 html_esq = f'<div><img src="{url_esq}" style="width:{cfg.tamanho_brasao_esquerdo_cm}cm;"></div>'
-            html_dir = "<div></div>"
+        
+        # Preenche o lado direito se for "Lados" OU "Apenas Direito"
+        if (posicao == "Lados (Esquerdo e Direito)" or posicao == "Apenas Direito"):
             if cfg.caminho_brasao_direito_processado and os.path.exists(cfg.caminho_brasao_direito_processado):
                 url_dir = f"file:///{os.path.abspath(cfg.caminho_brasao_direito_processado).replace(os.path.sep, '/')}"
                 html_dir = f'<div><img src="{url_dir}" style="width:{cfg.tamanho_brasao_direito_cm}cm;"></div>'
-            instituicao_div = f'<div class="instituicao-central">{instituicao_html}</div>'
-            return f'<div class="brasao-container brasoes-lado-a-lado">{html_esq}{instituicao_div}{html_dir}</div>'
-        brasao_html = ""
-        classe_container = "brasao-container"
-        if posicao == "Acima do Nome":
-            classe_container += " brasao-centralizado"
-            if cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
-                url = f"file:///{os.path.abspath(cfg.caminho_brasao_esquerdo_processado).replace(os.path.sep, '/')}"
-                brasao_html = f'<img src="{url}" style="width:{cfg.tamanho_brasao_esquerdo_cm}cm; margin-bottom: 1cm;">'
-        elif posicao == "Apenas Esquerdo":
-            classe_container += " brasao-esquerda"
-            if cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
-                url = f"file:///{os.path.abspath(cfg.caminho_brasao_esquerdo_processado).replace(os.path.sep, '/')}"
-                brasao_html = f'<img src="{url}" style="width:{cfg.tamanho_brasao_esquerdo_cm}cm; margin-bottom: 1cm;">'
-        elif posicao == "Apenas Direito":
-            classe_container += " brasao-direita"
-            if cfg.caminho_brasao_direito_processado and os.path.exists(cfg.caminho_brasao_direito_processado):
-                url = f"file:///{os.path.abspath(cfg.caminho_brasao_direito_processado).replace(os.path.sep, '/')}"
-                brasao_html = f'<img src="{url}" style="width:{cfg.tamanho_brasao_direito_cm}cm; margin-bottom: 1cm;">'
-        return f'<div class="{classe_container}">{brasao_html}{instituicao_html}</div>'
+
+        # O HTML da instituição fica no meio
+        instituicao_div = f'<div class="instituicao-central">{instituicao_html}</div>'
+        
+        # Retorna o layout de 3 colunas para TODOS os casos de "lado"
+        return f'<div class="brasao-container brasoes-lado-a-lado">{html_esq}{instituicao_div}{html_dir}</div>'
+    # --- FIM DA CORREÇÃO ---
 
     def _renderizar_secoes_recursivamente_html(self, no_pai: Capitulo, prefixo_numeracao=""):
         for i, no_filho in enumerate(no_pai.filhos, 1):
@@ -524,7 +509,6 @@ class GeradorHTMLPreview:
                 padrao = r"\{\{(Tabela|Figura|Formula):([^}]+)\}\}"
                 partes = re.split(padrao, no_filho.conteudo)
                 
-                # Controla se o próximo texto é uma continuação (sem recuo)
                 is_continuacao_paragrafo = False
                 
                 for k, parte in enumerate(partes):
@@ -533,11 +517,8 @@ class GeradorHTMLPreview:
                             paragrafos = parte.strip().split('\n')
                             for j, paragrafo_texto in enumerate(paragrafos):
                                 if paragrafo_texto.strip():
-                                    # Se j > 0, é um novo parágrafo (quebra de linha intencional)
-                                    # Se is_continuacao_paragrafo é True, é o texto após uma quebra de página
                                     eh_novo_paragrafo = (j > 0 or not is_continuacao_paragrafo)
                                     self._adicionar_paragrafo_quebravel(paragrafo_texto, is_continuacao=(not eh_novo_paragrafo))
-                                    # O *próximo* pedaço de texto *depois deste* será uma continuação
                                     is_continuacao_paragrafo = True 
                     elif k % 3 == 1: # É um bloco (Figura, etc.)
                         tipo, titulo = parte, partes[k+1]
@@ -575,7 +556,6 @@ class GeradorHTMLPreview:
                                 
                                 self._adicionar_elemento_bloco(self._renderizar_formula_html(obj), altura_total_bloco)
                         
-                        # Um bloco sempre força o próximo texto a ser um novo parágrafo
                         is_continuacao_paragrafo = False
                                 
             self._renderizar_secoes_recursivamente_html(no_filho, f"{numero_completo}.")
