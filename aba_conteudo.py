@@ -4,6 +4,9 @@
 # no editor para inserção rápida de ativos.
 # Correção (Bug Navegação): Adicionado sinal 'topicoSelecionadoParaNavegacao'
 # e método _get_item_numero_completo.
+# ATUALIZAÇÃO: Adicionada a aba "Listas" ao painel de bancos.
+# MODIFICAÇÃO: Adicionados botões Desfazer/Refazer na barra de ferramentas do editor.
+# CORREÇÃO (Undo/Redo): Corrigida a chamada para self.editor_capitulo.document().isUndoAvailable()
 
 import re
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -12,10 +15,11 @@ from PySide6.QtWidgets import (QWidget, QLabel, QTextEdit, QPushButton, QListWid
                                QTreeWidgetItem, QInputDialog, QAbstractItemView, QLineEdit, QTabWidget,
                                QSplitter, QToolButton)
 
-from documento import Capitulo, Tabela, Figura, Formula
+from documento import Capitulo, Tabela, Figura, Formula, ListaABNT # <--- ADICIONADO ListaABNT
 from dialogo_tabela import TabelaDialog
 from dialogo_figura import DialogoFigura
 from DialogoFormula import DialogoFormula
+from dialogo_lista import ListaDialog # <--- NOVO IMPORT
 
 # --- CLASSE ADICIONAL PARA SOBRESCREVER O MENU DE CONTEXTO (CORRIGIDA) ---
 class EditorConteudo(QTextEdit):
@@ -56,11 +60,9 @@ class ArvoreConteudo(QTreeWidget):
 
 # --- CLASSE ABA CONTEUDO ---
 class AbaConteudo(QWidget):
-    # --- INÍCIO DA CORREÇÃO (1/3) ---
     # SINAL: Emitido quando um tópico é selecionado,
     # enviando o ID da âncora HTML (ex: "secao-1-1")
     topicoSelecionadoParaNavegacao = QtCore.Signal(str)
-    # --- FIM DA CORREÇÃO (1/3) ---
 
     def __init__(self, documento, parent=None):
         super().__init__(parent)
@@ -150,6 +152,7 @@ class AbaConteudo(QWidget):
         self.lista_tabelas = QListWidget()
         self.lista_figuras = QListWidget()
         self.lista_formulas = QListWidget()
+        self.lista_listas = QListWidget() 
 
         self.bancos_tabs = QTabWidget()
 
@@ -237,10 +240,44 @@ class AbaConteudo(QWidget):
         btn_del_formula.clicked.connect(self._remover_formula)
         btn_ins_formula.clicked.connect(lambda: self._inserir_marcador_generico("Formula", self.lista_formulas.currentItem().text()) if self.lista_formulas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma fórmula do banco para inserir."))
         
+        # --- INÍCIO: Cria o widget para a aba "Listas" ---
+        listas_widget = QWidget()
+        listas_v_layout = QVBoxLayout(listas_widget)
+        listas_v_layout.addWidget(QLabel("Banco de Listas do Projeto:"))
+        
+        self.filtro_listas_check = QCheckBox("Mostrar apenas do tópico atual")
+        self.filtro_listas_check.stateChanged.connect(self.atualizar_bancos_visuais)
+        listas_v_layout.addWidget(self.filtro_listas_check)
+        listas_v_layout.addWidget(self.lista_listas)
+        
+        listas_btn_layout = QHBoxLayout()
+        btn_add_lista = QPushButton("Criar")
+        btn_edit_lista = QPushButton("Editar")
+        btn_del_lista = QPushButton("Remover")
+
+        btn_edit_lista.setProperty("cssClass", "utility")
+        btn_del_lista.setProperty("cssClass", "destructive")
+        
+        listas_btn_layout.addWidget(btn_add_lista)
+        listas_btn_layout.addWidget(btn_edit_lista)
+        listas_btn_layout.addWidget(btn_del_lista)
+        listas_v_layout.addLayout(listas_btn_layout)
+        
+        btn_ins_lista = QPushButton("Inserir no Texto")
+        listas_v_layout.addWidget(btn_ins_lista)
+        
+        # Conecta os slots
+        btn_add_lista.clicked.connect(self._adicionar_lista)
+        btn_edit_lista.clicked.connect(self._editar_lista)
+        btn_del_lista.clicked.connect(self._remover_lista)
+        btn_ins_lista.clicked.connect(lambda: self._inserir_marcador_generico("Lista", self.lista_listas.currentItem().text()) if self.lista_listas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma lista do banco para inserir."))
+        # --- FIM: widget da aba "Listas" ---
+        
         # Adiciona os widgets criados como abas no QTabWidget
         self.bancos_tabs.addTab(tabelas_widget, "Tabelas")
         self.bancos_tabs.addTab(figuras_widget, "Figuras")
         self.bancos_tabs.addTab(formulas_widget, "Fórmulas")
+        self.bancos_tabs.addTab(listas_widget, "Listas") 
 
         left_splitter.addWidget(self.bancos_tabs)
         left_splitter.setSizes([400, 300]) 
@@ -255,6 +292,20 @@ class AbaConteudo(QWidget):
         
         format_toolbar = QHBoxLayout()
         format_toolbar.addWidget(QLabel("Formatação:"))
+        
+        # 1. Criar botão Desfazer (Undo)
+        self.btn_desfazer = QToolButton()
+        self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo.png"))
+        self.btn_desfazer.setToolTip("Desfazer (Ctrl+Z)")
+        self.btn_desfazer.setEnabled(False) # Começa desabilitado
+        format_toolbar.addWidget(self.btn_desfazer)
+
+        # 2. Criar botão Refazer (Redo)
+        self.btn_refazer = QToolButton()
+        self.btn_refazer.setIcon(QtGui.QIcon("assets/icons/redo.png"))
+        self.btn_refazer.setToolTip("Refazer (Ctrl+Y)")
+        self.btn_refazer.setEnabled(False) # Começa desabilitado
+        format_toolbar.addWidget(self.btn_refazer)
         
         # BOTÕES DE ÍCONE (QToolButton)
         self.btn_quebra_pagina = QToolButton()
@@ -271,12 +322,17 @@ class AbaConteudo(QWidget):
         
         format_toolbar.addStretch()
         
-        # --- MUDANÇA: USAR NOVO EDITOR COM REFERÊNCIA AO PARENT ---
-        self.editor_capitulo = EditorConteudo(aba_conteudo_parent=self) # <--- MUDANÇA AQUI
+        self.editor_capitulo = EditorConteudo(aba_conteudo_parent=self) 
         self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
-        # O menu de contexto agora é tratado internamente pelo EditorConteudo
-        # ---------------------------------
 
+        # 3. Conectar os cliques aos slots do editor
+        self.btn_desfazer.clicked.connect(self.editor_capitulo.undo)
+        self.btn_refazer.clicked.connect(self.editor_capitulo.redo)
+        
+        # 4. Conectar a disponibilidade (para habilitar/desabilitar botões)
+        self.editor_capitulo.undoAvailable.connect(self.btn_desfazer.setEnabled)
+        self.editor_capitulo.redoAvailable.connect(self.btn_refazer.setEnabled)
+        
         right_layout.addWidget(self.label_capitulo_atual)
         right_layout.addLayout(format_toolbar)
         right_layout.addWidget(self.editor_capitulo, 1) 
@@ -291,12 +347,8 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot(QtWidgets.QMenu)
     def _adicionar_acoes_menu_contexto(self, menu: QtWidgets.QMenu): # Aceita o menu nativo
-        """Adiciona as ações customizadas (Inserir Tabela, Figura, Formula) ao menu nativo."""
-        
-        # Adiciona um separador ANTES das nossas opções, para separá-las das nativas
         menu.addSeparator() 
 
-        # --- 1. Submenu de Tabelas ---
         menu_tabelas = menu.addMenu("Inserir Tabela")
         self._adicionar_submenus_banco(
             menu=menu_tabelas, 
@@ -306,7 +358,6 @@ class AbaConteudo(QWidget):
             criar_slot=self._adicionar_tabela
         )
 
-        # --- 2. Submenu de Figuras ---
         menu_figuras = menu.addMenu("Inserir Figura")
         self._adicionar_submenus_banco(
             menu=menu_figuras, 
@@ -316,7 +367,6 @@ class AbaConteudo(QWidget):
             criar_slot=self._adicionar_figura
         )
 
-        # --- 3. Submenu de Fórmulas ---
         menu_formulas = menu.addMenu("Inserir Fórmula")
         self._adicionar_submenus_banco(
             menu=menu_formulas, 
@@ -325,31 +375,32 @@ class AbaConteudo(QWidget):
             inserir_slot=self._inserir_marcador_generico,
             criar_slot=self._adicionar_formula
         )
+        
+        menu_listas = menu.addMenu("Inserir Lista")
+        self._adicionar_submenus_banco(
+            menu=menu_listas, 
+            banco=self.documento.banco_listas, 
+            tipo="Lista",
+            inserir_slot=self._inserir_marcador_generico,
+            criar_slot=self._adicionar_lista
+        )
 
 
     def _adicionar_submenus_banco(self, menu: QtWidgets.QMenu, banco: list, tipo: str, inserir_slot, criar_slot):
-        """Função auxiliar para popular submenus com itens do banco e opção 'Novo'."""
-
-        # 1. Opção para Criar Novo (sempre no topo)
         acao_novo = menu.addAction(f"Criar Nova {tipo}...")
         acao_novo.triggered.connect(criar_slot)
         
         if banco:
             menu.addSeparator()
-
-            # 2. Opções para Inserir Itens Existentes
             for item in banco:
-                # Usa 'titulo' para Tabelas/Figuras e 'legenda' para Fórmulas
                 nome = getattr(item, 'titulo', None) or getattr(item, 'legenda', None)
                 
                 if nome:
                     acao_inserir = menu.addAction(f"Inserir: {nome}")
-                    # Conecta a função genérica de inserção com o tipo e nome do item
                     acao_inserir.triggered.connect(lambda checked, n=nome, t=tipo: inserir_slot(t, n))
     
     @QtCore.Slot(str, str)
     def _inserir_marcador_generico(self, tipo: str, nome: str):
-        """Insere um marcador de referência genérico no editor."""
         self.editor_capitulo.insertPlainText(f"\n{{{{{tipo}:{nome}}}}}\n")
 
     # --- FIM DOS MÉTODOS DE MENU DE CONTEXTO ---
@@ -384,15 +435,21 @@ class AbaConteudo(QWidget):
         else:
             for formula in self.documento.banco_formulas:
                 self.lista_formulas.addItem(formula.legenda)
+        
+        self.lista_listas.clear()
+        if self.filtro_listas_check.isChecked() and capitulo_selecionado:
+            titulos_usados = set(re.findall(r"\{\{Lista:([^}]+)\}\}", conteudo_capitulo))
+            for lista in self.documento.banco_listas:
+                if lista.titulo in titulos_usados: self.lista_listas.addItem(lista.titulo)
+        else:
+            for lista in self.documento.banco_listas: self.lista_listas.addItem(lista.titulo)
     
     @QtCore.Slot()
     def _inserir_quebra_pagina(self):
-        """Insere o marcador de quebra de página no editor."""
         self.editor_capitulo.insertPlainText("\n{{QUEBRA_PAGINA}}\n")
 
     @QtCore.Slot()
     def _inserir_pagina_em_branco(self):
-        """Insere o marcador de página em branco no editor."""
         self.editor_capitulo.insertPlainText("\n{{PAGINA_EM_BRANCO}}\n")
     
     @QtCore.Slot()
@@ -400,58 +457,41 @@ class AbaConteudo(QWidget):
         self._salvar_conteudo_capitulo()
         self.atualizar_bancos_visuais()
 
-    # --- INÍCIO DA CORREÇÃO (2/3) ---
     def _get_item_numero_completo(self, item: QTreeWidgetItem) -> str:
-        """
-        Calcula o número completo do item (ex: "1.2.3")
-        baseado na sua posição na árvore.
-        """
         path_parts = []
         current = item
         
-        # O invisibleRootItem é o "pai" de todos os itens de nível superior
         while current and current is not self.arvore_capitulos.invisibleRootItem():
             parent = current.parent()
             index = -1
             
             if parent:
-                # É um filho, pega o índice em relação ao pai
                 index = parent.indexOfChild(current)
             else:
-                # É um item de nível superior
                 index = self.arvore_capitulos.indexOfTopLevelItem(current)
                 
             if index != -1:
                 path_parts.append(str(index + 1))
             else:
-                break # Item não encontrado (não deve acontecer)
+                break 
             
             current = parent
             
-        # A lista é construída de filho para pai (ex: ["3", "2", "1"]),
-        # então invertemos para ter a ordem correta (ex: "1.2.3").
         return ".".join(reversed(path_parts))
-    # --- FIM DA CORREÇÃO (2/3) ---
 
     @QtCore.Slot(QTreeWidgetItem, QTreeWidgetItem)
     def _on_capitulo_selecionado_changed(self, item_atual, item_anterior):
         self._carregar_capitulo_no_editor(item_atual, item_anterior)
         self.atualizar_bancos_visuais()
 
-        # --- INÍCIO DA CORREÇÃO (3/3) ---
         if item_atual:
             try:
-                # Calcula o número (ex: "1.2")
                 numero_completo = self._get_item_numero_completo(item_atual)
                 if numero_completo:
-                    # Gera o ID da âncora (ex: "secao-1-2")
                     id_ancora = f"secao-{numero_completo.replace('.', '-')}"
-                    # Emite o sinal para o main_app.py
                     self.topicoSelecionadoParaNavegacao.emit(id_ancora)
             except Exception as e:
-                # É bom ter um print caso algo dê errado
                 print(f"Erro ao gerar âncora para navegação: {e}")
-        # --- FIM DA CORREÇÃO (3/3) ---
 
     @QtCore.Slot(str)
     def _filtrar_arvore(self, texto_busca):
@@ -492,6 +532,14 @@ class AbaConteudo(QWidget):
         self.bancos_tabs.setEnabled(elementos_habilitados)
         self.btn_quebra_pagina.setEnabled(elementos_habilitados)
         self.btn_pagina_em_branco.setEnabled(elementos_habilitados)
+        
+        # --- INÍCIO DA CORREÇÃO ---
+        # A função é .document().isUndoAvailable(), não .isUndoAvailable()
+        if hasattr(self, 'btn_desfazer'):
+            self.btn_desfazer.setEnabled(elementos_habilitados and self.editor_capitulo.document().isUndoAvailable())
+        if hasattr(self, 'btn_refazer'):
+            self.btn_refazer.setEnabled(elementos_habilitados and self.editor_capitulo.document().isRedoAvailable())
+        # --- FIM DA CORREÇÃO ---
         
         if not capitulo:
             self.editor_capitulo.clear()
@@ -535,6 +583,56 @@ class AbaConteudo(QWidget):
             self.atualizar_bancos_visuais()
             if nova_formula.legenda:
                 self._inserir_marcador_generico("Formula", nova_formula.legenda)
+
+    # --- INÍCIO: NOVOS SLOTS PARA LISTAS ---
+
+    @QtCore.Slot()
+    def _adicionar_lista(self):
+        dialog = ListaDialog(parent=self)
+        if dialog.exec():
+            nova_lista = dialog.get_dados_lista()
+            
+            if any(l.titulo.lower() == nova_lista.titulo.lower() for l in self.documento.banco_listas):
+                QMessageBox.critical(self, "Erro de Duplicidade", 
+                                     f"Já existe uma lista com o título '{nova_lista.titulo}'.\nO título deve ser único.")
+                return
+
+            self.documento.banco_listas.append(nova_lista)
+            self.atualizar_bancos_visuais()
+            self._inserir_marcador_generico("Lista", nova_lista.titulo)
+
+    @QtCore.Slot()
+    def _editar_lista(self):
+        linha = self.lista_listas.currentRow()
+        if linha == -1: return
+        
+        titulo_lista = self.lista_listas.item(linha).text()
+        lista_original = next((l for l in self.documento.banco_listas if l.titulo == titulo_lista), None)
+        if not lista_original: return
+        
+        dialog = ListaDialog(lista_existente=lista_original, parent=self)
+        if dialog.exec():
+            lista_editada = dialog.get_dados_lista()
+            
+            if lista_original.titulo != lista_editada.titulo:
+                if any(l.titulo.lower() == lista_editada.titulo.lower() for l in self.documento.banco_listas if l is not lista_original):
+                    QMessageBox.critical(self, "Erro de Duplicidade", 
+                                         f"Já existe outra lista com o título '{lista_editada.titulo}'.\nO título deve ser único.")
+                    return 
+            
+            self.atualizar_bancos_visuais()
+
+    @QtCore.Slot()
+    def _remover_lista(self):
+        linha = self.lista_listas.currentRow()
+        if linha == -1: return
+        
+        titulo_lista = self.lista_listas.item(linha).text()
+        if QMessageBox.question(self, "Confirmar", f"Remover a lista '{titulo_lista}' do projeto?") == QMessageBox.StandardButton.Yes:
+            self.documento.banco_listas = [l for l in self.documento.banco_listas if l.titulo != titulo_lista]
+            self.atualizar_bancos_visuais()
+            
+    # --- FIM: NOVOS SLOTS PARA LISTAS ---
                 
     def _get_capitulo_selecionado(self) -> Capitulo | None:
         item = self.arvore_capitulos.currentItem()

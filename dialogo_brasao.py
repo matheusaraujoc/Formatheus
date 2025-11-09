@@ -1,6 +1,8 @@
 # dialogo_brasao.py
 # Descrição: Versão atualizada com ferramenta de corte (crop)
 # interativa (Retângulo e Polígono) e propriedades QSS.
+# MODIFICAÇÃO: Integrado o CropLabel com Zoom (scroll),
+# Pan (botão direito) e Undo (Ctrl+Z).
 
 import os
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -8,99 +10,134 @@ from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QLineEdit, QComboBox,
                                QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog,
                                QDialogButtonBox, QMessageBox, QRadioButton, 
                                QButtonGroup, QFrame)
-from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QPolygonF, QPainterPath
-from PySide6.QtCore import Qt, QRect, QPoint, QRectF
-from PIL import Image, ImageDraw # Adicionado ImageDraw para a máscara
+# --- Imports Atualizados ---
+from PySide6.QtGui import (QPixmap, QPainter, QColor, QPen, QPolygonF, QPainterPath,
+                           QKeyEvent)
+from PySide6.QtCore import Qt, QRect, QPoint, QRectF, QSize
+# --- Fim Imports Atualizados ---
+from PIL import Image, ImageDraw 
 
 # =============================================================================
 # --- CLASSE: CropLabel ---
-# Esta é a ferramenta de corte interativa.
-# AGORA COM SUPORTE AOS MODOS RETÂNGULO E POLÍGONO.
+# Esta é a nova versão com Zoom, Pan (corrigido) e Undo.
 # =============================================================================
 
 class CropLabel(QLabel):
     """
-    Um QLabel personalizado que permite ao usuário desenhar uma seleção
-    (retângulo ou polígono) sobre a imagem.
+    QLabel personalizado com zoom (scroll), pan (botão direito),
+    e corte (botão esquerdo).
     """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.original_pixmap: QPixmap | None = None
         self.scaled_pixmap: QPixmap | None = None
         
-        # --- Geometria da imagem e escala ---
         self.pixmap_rect_in_widget = QRect()
         self.scale_factor = 1.0
 
-        # --- Estados da Ferramenta ---
-        self.mode = 'rect' # 'rect' ou 'poly'
-        self.is_selecting = False # Apenas para o modo 'rect'
+        self.zoom_factor = 1.0
+        self.pan_offset = QPoint(0, 0) 
+        self.is_panning = False
+        self.last_pan_pos = QPoint()
+
+        self.mode = 'rect' 
+        self.is_selecting = False 
         
-        # --- Estado: Modo Retângulo ---
-        self.selection_rect = QRect()
-        self.start_pos = QPoint()
+        # --- INÍCIO DA CORREÇÃO (Coordenadas Originais) ---
+        # A seleção agora é armazenada em relação à imagem original (0,0)
+        self.selection_rect_orig = QRect()
+        self.start_pos_orig = QPoint()
+        self.poly_points_orig = [] 
+        self.preview_point_orig = None
+        # --- FIM DA CORREÇÃO ---
         
-        # --- Estado: Modo Polígono ---
-        self.poly_points = [] # Lista de QPoint
         self.poly_closed = False
-        self.preview_point = None # Para a linha "elástica"
-        self.poly_click_tolerance = 10 # Distância para fechar o polígono
+        self.poly_click_tolerance = 10 
 
         self.setScaledContents(False)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft) 
         self.setMinimumSize(250, 250)
         self.setStyleSheet("border: 1px dashed gray; padding: 5px;")
         
-        # Habilita o rastreamento do mouse para a linha elástica
         self.setMouseTracking(True) 
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
     def set_mode(self, mode: str):
-        """Alterna o modo da ferramenta ('rect' ou 'poly')."""
         if mode not in ['rect', 'poly']:
             return
         self.mode = mode
         self.reset_selection()
 
     def reset_selection(self):
-        """Limpa a seleção atual para ambos os modos."""
-        self.selection_rect = QRect()
-        self.poly_points = []
+        self.selection_rect_orig = QRect()
+        self.poly_points_orig = []
         self.poly_closed = False
-        self.preview_point = None
+        self.preview_point_orig = None
         self.is_selecting = False
-        self.update() # Força o repaint para limpar a tela
+        self.update() 
 
     def setOriginalPixmap(self, pixmap: QPixmap):
-        """Define o pixmap original e atualiza a visualização."""
         self.original_pixmap = pixmap
-        self.reset_selection() # Reseta a seleção
+        self.zoom_factor = 1.0
+        self.pan_offset = QPoint(0, 0)
+        self.reset_selection()
         self._update_scaled_pixmap()
 
     def resizeEvent(self, event: QtGui.QResizeEvent):
-        """Atualiza o pixmap escalonado quando o widget muda de tamanho."""
         self._update_scaled_pixmap()
         super().resizeEvent(event)
 
     def _update_scaled_pixmap(self):
-        """Redimensiona o pixmap original para caber no widget (mantendo aspect ratio)"""
+        """Redimensiona e calcula a posição do pixmap com base no zoom e pan."""
+        
+        self.setPixmap(QPixmap()) 
+        
         if not self.original_pixmap:
-            self.setPixmap(QPixmap()) # Limpa a imagem
+            self.scaled_pixmap = None
+            self.update()
             return
 
-        self.scaled_pixmap = self.original_pixmap.scaled(
+        fit_size = self.original_pixmap.size().scaled(
             self.size(), 
-            Qt.AspectRatioMode.KeepAspectRatio, 
-            Qt.TransformationMode.SmoothTransformation
+            Qt.AspectRatioMode.KeepAspectRatio
         )
         
-        self.setPixmap(self.scaled_pixmap)
-
+        zoomed_size = QSize(
+            int(fit_size.width() * self.zoom_factor),
+            int(fit_size.height() * self.zoom_factor)
+        )
+        
+        if self.scaled_pixmap is None or self.scaled_pixmap.size() != zoomed_size:
+            self.scaled_pixmap = self.original_pixmap.scaled(
+                zoomed_size, 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
+        
         pw = self.scaled_pixmap.width()
         ph = self.scaled_pixmap.height()
-        lw = self.width()
-        lh = self.height()
-        x = (lw - pw) / 2
-        y = (lh - ph) / 2
+        lw = self.width() 
+        lh = self.height() 
+        
+        x_base = (lw - pw) / 2
+        y_base = (lh - ph) / 2
+        
+        if pw > lw:
+            max_pan_x = (pw - lw) / 2
+            clamped_pan_x = max(-max_pan_x, min(self.pan_offset.x(), max_pan_x))
+            self.pan_offset.setX(int(clamped_pan_x))
+        else:
+            self.pan_offset.setX(0)
+            
+        if ph > lh:
+            max_pan_y = (ph - lh) / 2
+            clamped_pan_y = max(-max_pan_y, min(self.pan_offset.y(), max_pan_y))
+            self.pan_offset.setY(int(clamped_pan_y))
+        else:
+            self.pan_offset.setY(0)
+
+        x = x_base + self.pan_offset.x()
+        y = y_base + self.pan_offset.y()
         
         self.pixmap_rect_in_widget = QRect(int(x), int(y), int(pw), int(ph))
         
@@ -108,188 +145,260 @@ class CropLabel(QLabel):
             self.scale_factor = self.original_pixmap.width() / pw
         else:
             self.scale_factor = 1.0
+        
+        self.update() 
+
+    # --- INÍCIO DA CORREÇÃO (ZOOM) ---
+    def wheelEvent(self, event: QtGui.QWheelEvent):
+        if not self.original_pixmap:
+            event.ignore()
+            return
+
+        if event.angleDelta().y() > 0:
+            self.zoom_factor *= 1.20
+        else:
+            self.zoom_factor /= 1.20
+        
+        self.zoom_factor = max(1.0, self.zoom_factor) 
+        
+        self._update_scaled_pixmap()
+        
+        # self.reset_selection() # <--- REMOVIDO! A seleção não some mais.
+        
+        event.accept()
+    # --- FIM DA CORREÇÃO ---
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent):
+        if event.key() == Qt.Key.Key_Z and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self._undo_last_poly_point()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def _undo_last_poly_point(self):
+        if self.mode == 'poly' and self.poly_points_orig:
+            self.poly_points_orig.pop()
+            self.poly_closed = False
+            self.update()
+            print("Ponto do polígono desfeito.")
 
     def _clamp_pos_to_pixmap(self, pos: QPoint) -> QPoint:
-        """Força o cursor a ficar dentro dos limites da imagem visível."""
         x = max(self.pixmap_rect_in_widget.left(), min(pos.x(), self.pixmap_rect_in_widget.right()))
         y = max(self.pixmap_rect_in_widget.top(), min(pos.y(), self.pixmap_rect_in_widget.bottom()))
         return QPoint(x, y)
 
+    # --- INÍCIO DA CORREÇÃO (Coordenadas) ---
+    def _widget_to_orig_coords(self, widget_pos: QPoint) -> QPoint:
+        """Converte coordenadas do widget para as coordenadas da imagem original."""
+        if not self.original_pixmap or self.scale_factor == 0:
+            return QPoint()
+        
+        relative_point = widget_pos - self.pixmap_rect_in_widget.topLeft()
+        
+        orig_x = int(relative_point.x() * self.scale_factor)
+        orig_y = int(relative_point.y() * self.scale_factor)
+        
+        orig_w = self.original_pixmap.width()
+        orig_h = self.original_pixmap.height()
+        orig_x = max(0, min(orig_x, orig_w))
+        orig_y = max(0, min(orig_y, orig_h))
+        
+        return QPoint(orig_x, orig_y)
+
+    def _orig_rect_to_widget_rect(self, orig_rect: QRect) -> QRect:
+        """Converte um QRect da imagem original para coordenadas do widget."""
+        if not self.original_pixmap or self.scale_factor == 0:
+            return QRect()
+
+        scaled_x1 = int(orig_rect.left() / self.scale_factor)
+        scaled_y1 = int(orig_rect.top() / self.scale_factor)
+        scaled_x2 = int(orig_rect.right() / self.scale_factor)
+        scaled_y2 = int(orig_rect.bottom() / self.scale_factor)
+        
+        scaled_rect = QRect(QPoint(scaled_x1, scaled_y1), QPoint(scaled_x2, scaled_y2))
+        
+        return scaled_rect.translated(self.pixmap_rect_in_widget.topLeft())
+
+    def _orig_poly_to_widget_poly(self, orig_points: list[QPoint]) -> list[QPoint]:
+        """Converte uma lista de QPoints originais para coordenadas do widget."""
+        if not self.original_pixmap or self.scale_factor == 0:
+            return []
+            
+        widget_points = []
+        for p in orig_points:
+            scaled_x = int(p.x() / self.scale_factor)
+            scaled_y = int(p.y() / self.scale_factor)
+            widget_point = QPoint(scaled_x, scaled_y) + self.pixmap_rect_in_widget.topLeft()
+            widget_points.append(widget_point)
+        return widget_points
+    # --- FIM DA CORREÇÃO ---
+
     def mousePressEvent(self, event: QtGui.QMouseEvent):
-        """Inicia a seleção (modo rect) ou adiciona um ponto (modo poly)."""
-        # Só processa se o clique for dentro da imagem
+        
+        if event.button() == Qt.MouseButton.RightButton and self.zoom_factor > 1.0:
+            self.is_panning = True
+            self.last_pan_pos = event.pos()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        
         if event.button() != Qt.MouseButton.LeftButton or \
            not self.pixmap_rect_in_widget.contains(event.pos()):
             return
 
         clamped_pos = self._clamp_pos_to_pixmap(event.pos())
+        orig_pos = self._widget_to_orig_coords(clamped_pos)
 
-        # --- LÓGICA MODO RETÂNGULO ---
         if self.mode == 'rect':
             self.is_selecting = True
-            self.start_pos = clamped_pos
-            self.selection_rect = QRect(self.start_pos, self.start_pos)
+            self.start_pos_orig = orig_pos
+            self.selection_rect_orig = QRect(orig_pos, orig_pos)
             self.update()
             
-        # --- LÓGICA MODO POLÍGONO ---
         elif self.mode == 'poly':
             if self.poly_closed:
-                # Polígono anterior estava fechado, começa um novo
                 self.reset_selection()
             
-            # Verificar se o clique foi perto do primeiro ponto (para fechar)
-            if len(self.poly_points) > 2:
-                dist_ao_inicio = (clamped_pos - self.poly_points[0]).manhattanLength()
-                if dist_ao_inicio < self.poly_click_tolerance:
+            if len(self.poly_points_orig) > 2:
+                # O clique para fechar também deve ser em coordenadas originais
+                dist_ao_inicio = (orig_pos - self.poly_points_orig[0]).manhattanLength()
+                # A tolerância deve ser dimensionada
+                scaled_tolerance = self.poly_click_tolerance / (1/self.scale_factor)
+                
+                if dist_ao_inicio < scaled_tolerance:
                     self.poly_closed = True
-                    self.preview_point = None # Esconde a linha elástica
+                    self.preview_point_orig = None 
                     self.update()
-                    return # Não adiciona o último ponto, fecha o loop
+                    return 
 
-            # Adiciona o novo ponto
-            self.poly_points.append(clamped_pos)
+            self.poly_points_orig.append(orig_pos)
             self.update()
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent):
-        """Atualiza a seleção (modo rect) ou a linha elástica (modo poly)."""
-        clamped_pos = self._clamp_pos_to_pixmap(event.pos())
         
-        # --- LÓGICA MODO RETÂNGULO ---
+        if self.is_panning:
+            delta = event.pos() - self.last_pan_pos
+            self.pan_offset += delta
+            self.last_pan_pos = event.pos()
+            self._update_scaled_pixmap()
+            event.accept()
+            return
+
+        clamped_pos = self._clamp_pos_to_pixmap(event.pos())
+        orig_pos = self._widget_to_orig_coords(clamped_pos)
+        
         if self.mode == 'rect':
             if self.is_selecting:
-                self.selection_rect = QRect(self.start_pos, clamped_pos).normalized()
+                self.selection_rect_orig = QRect(self.start_pos_orig, orig_pos).normalized()
                 self.update()
                 
-        # --- LÓGICA MODO POLÍGONO ---
         elif self.mode == 'poly':
             if not self.poly_closed:
-                self.preview_point = clamped_pos
+                self.preview_point_orig = orig_pos
                 self.update()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent):
-        """Finaliza a seleção (modo rect)."""
+        
+        if event.button() == Qt.MouseButton.RightButton and self.is_panning:
+            self.is_panning = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton and self.is_selecting:
             if self.mode == 'rect':
                 self.is_selecting = False
                 self.update()
 
     def paintEvent(self, event: QtGui.QPaintEvent):
-        """Desenha o pixmap e o overlay de corte (retângulo ou polígono)."""
-        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self.palette().window())
+
+        if self.scaled_pixmap:
+            painter.drawPixmap(self.pixmap_rect_in_widget.topLeft(), self.scaled_pixmap)
         
         if not self.original_pixmap:
-            return
+             painter.end()
+             return
 
-        painter = QPainter(self)
-        
-        # --- 1. Preparar o Overlay Escuro ---
         overlay_path = QPainterPath()
         overlay_path.addRect(QRectF(self.pixmap_rect_in_widget))
 
-        # --- 2. "Cortar" a Seleção do Overlay ---
         if self.has_selection():
             if self.mode == 'rect':
-                overlay_path.addRect(QRectF(self.selection_rect))
+                # Converte o rect original para o widget rect
+                widget_selection_rect = self._orig_rect_to_widget_rect(self.selection_rect_orig)
+                overlay_path.addRect(QRectF(widget_selection_rect))
+                
             elif self.mode == 'poly':
-                poly_qpolygon = QPolygonF(self.poly_points)
+                # Converte os pontos originais para pontos do widget
+                widget_poly_points = self._orig_poly_to_widget_poly(self.poly_points_orig)
+                poly_qpolygon = QPolygonF(widget_poly_points)
                 overlay_path.addPolygon(poly_qpolygon)
-            
+                
             overlay_path.setFillRule(Qt.FillRule.OddEvenFill)
         
         painter.fillPath(overlay_path, QColor(0, 0, 0, 100))
 
-        # --- 3. Desenhar as Linhas da Seleção ---
         pen = QPen(Qt.GlobalColor.red, 2, Qt.PenStyle.DashLine)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
         if self.mode == 'rect' and self.has_selection():
-            painter.drawRect(self.selection_rect)
+            widget_selection_rect = self._orig_rect_to_widget_rect(self.selection_rect_orig)
+            painter.drawRect(widget_selection_rect)
             
-        elif self.mode == 'poly' and self.poly_points:
-            # Desenha as linhas do polígono
-            poly_qpolygon = QPolygonF(self.poly_points)
+        elif self.mode == 'poly' and self.poly_points_orig:
+            widget_poly_points = self._orig_poly_to_widget_poly(self.poly_points_orig)
+            poly_qpolygon = QPolygonF(widget_poly_points)
             painter.drawPolyline(poly_qpolygon)
             
             if self.poly_closed:
-                # Se fechado, desenha a linha final
-                painter.drawLine(self.poly_points[-1], self.poly_points[0])
-            elif self.preview_point:
-                # Senão, desenha a linha elástica
-                painter.drawLine(self.poly_points[-1], self.preview_point)
+                painter.drawLine(widget_poly_points[-1], widget_poly_points[0])
+            elif self.preview_point_orig:
+                widget_preview_point = self._orig_poly_to_widget_poly([self.preview_point_orig])[0]
+                painter.drawLine(widget_poly_points[-1], widget_preview_point)
 
-            # --- 4. Desenhar os Pontos (Handles) do Polígono ---
             painter.setPen(QPen(QColor("white"), 1))
             painter.setBrush(QColor("red"))
-            for point in self.poly_points:
+            for point in widget_poly_points:
                 painter.drawEllipse(point, 4, 4)
             
-            # Destaca o primeiro ponto
             if not self.poly_closed:
                 painter.setBrush(QColor("lime"))
-                painter.drawEllipse(self.poly_points[0], 5, 5)
+                painter.drawEllipse(widget_poly_points[0], 5, 5)
         
         painter.end()
 
     def has_selection(self) -> bool:
-        """Verifica se o usuário fez uma seleção válida."""
         if self.mode == 'rect':
-            return self.selection_rect.isValid() and \
-                   self.selection_rect.width() > 5 and \
-                   self.selection_rect.height() > 5
+            return self.selection_rect_orig.isValid() and \
+                   self.selection_rect_orig.width() > 5 and \
+                   self.selection_rect_orig.height() > 5
         elif self.mode == 'poly':
-            return self.poly_closed and len(self.poly_points) > 2
+            return self.poly_closed and len(self.poly_points_orig) > 2
         return False
 
     def get_crop_coords(self) -> dict | None:
         """
-        Converte as coordenadas do widget (tela) para as coordenadas
-        da imagem original (arquivo).
-        Retorna um dicionário: {"mode": "rect", "coords": (l, u, r, b)}
-        ou {"mode": "poly", "coords": [(x1, y1), (x2, y2), ...]}
+        Retorna as coordenadas da imagem original (agora muito mais simples).
         """
         if not self.has_selection():
             return None
         
-        # --- MODO RETÂNGULO (COMO ANTES) ---
         if self.mode == 'rect':
-            relative_rect = self.selection_rect.translated(-self.pixmap_rect_in_widget.topLeft())
-            
-            orig_x1 = int(relative_rect.left() * self.scale_factor)
-            orig_y1 = int(relative_rect.top() * self.scale_factor)
-            orig_x2 = int(relative_rect.right() * self.scale_factor)
-            orig_y2 = int(relative_rect.bottom() * self.scale_factor)
-            
-            orig_w = self.original_pixmap.width()
-            orig_h = self.original_pixmap.height()
-            
-            orig_x1 = max(0, orig_x1)
-            orig_y1 = max(0, orig_y1)
-            orig_x2 = min(orig_w, orig_x2)
-            orig_y2 = min(orig_h, orig_y2)
+            # Retorna as coordenadas originais diretamente
+            coords = (
+                self.selection_rect_orig.left(),
+                self.selection_rect_orig.top(),
+                self.selection_rect_orig.right(),
+                self.selection_rect_orig.bottom()
+            )
+            return {"mode": "rect", "coords": coords}
 
-            return {"mode": "rect", "coords": (orig_x1, orig_y1, orig_x2, orig_y2)}
-
-        # --- MODO POLÍGONO (NOVO) ---
         elif self.mode == 'poly':
-            orig_points = []
-            orig_w = self.original_pixmap.width()
-            orig_h = self.original_pixmap.height()
-
-            for point in self.poly_points:
-                # 1. Torna o ponto relativo ao topo/esquerda da imagem
-                relative_point = point - self.pixmap_rect_in_widget.topLeft()
-                
-                # 2. Converte as coordenadas escaladas de volta para o original
-                orig_x = int(relative_point.x() * self.scale_factor)
-                orig_y = int(relative_point.y() * self.scale_factor)
-                
-                # 3. Garante que as coordenadas não saiam dos limites
-                orig_x = max(0, min(orig_x, orig_w))
-                orig_y = max(0, min(orig_y, orig_h))
-                
-                orig_points.append((orig_x, orig_y)) # Adiciona como tupla (x, y)
-                
+            # Retorna os pontos originais diretamente
+            orig_points = [(p.x(), p.y()) for p in self.poly_points_orig]
             return {"mode": "poly", "coords": orig_points}
 
         return None
@@ -302,7 +411,7 @@ class DialogoBrasao(QDialog):
     def __init__(self, caminho_original: str = None, tamanho_cm: float = 2.5, parent: QWidget = None):
         super().__init__(parent)
         self.setWindowTitle("Editor de Brasão (Recorte)")
-        self.setMinimumSize(700, 600) # Aumentei a altura para as novas opções
+        self.setMinimumSize(700, 600) 
 
         self.caminho_original = caminho_original
         self.tamanho_cm = tamanho_cm
@@ -318,7 +427,6 @@ class DialogoBrasao(QDialog):
         left_layout = QVBoxLayout(left_panel)
         form_layout = QtWidgets.QFormLayout()
 
-        # --- Widgets de Caminho e Tamanho ---
         self.caminho_input = QLineEdit(self.caminho_original)
         self.caminho_input.setReadOnly(True)
         
@@ -340,7 +448,6 @@ class DialogoBrasao(QDialog):
         form_layout.addRow("Tamanho no Documento:", self.tamanho_combo)
         left_layout.addLayout(form_layout)
         
-        # --- NOVO: Seletor de Ferramenta ---
         tool_frame = QFrame()
         tool_frame.setFrameShape(QFrame.Shape.StyledPanel)
         tool_layout = QVBoxLayout(tool_frame)
@@ -356,7 +463,7 @@ class DialogoBrasao(QDialog):
         
         self.btn_reset_selecao = QPushButton("Limpar Seleção")
         self.btn_reset_selecao.setProperty("cssClass", "utility")
-        self.btn_reset_selecao.setVisible(False) # Visível apenas no modo polígono
+        self.btn_reset_selecao.setVisible(False) 
         
         tool_layout.addWidget(self.radio_rect)
         tool_layout.addWidget(self.radio_poly)
@@ -364,14 +471,12 @@ class DialogoBrasao(QDialog):
         
         left_layout.addWidget(tool_frame)
         
-        # --- NOVO: Label de Instruções Dinâmico ---
         self.info_label = QLabel()
         self.info_label.setWordWrap(True)
         left_layout.addWidget(self.info_label)
         
         left_layout.addStretch()
 
-        # --- Botões OK/Cancelar ---
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         cancel_button = self.buttons.button(QDialogButtonBox.StandardButton.Cancel)
         if cancel_button:
@@ -385,26 +490,26 @@ class DialogoBrasao(QDialog):
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         
-        self.preview_label = CropLabel() # Nosso widget customizado
+        self.preview_label = CropLabel() 
         self.preview_label.setText("A prévia do brasão aparecerá aqui.")
         
-        right_layout.addWidget(QLabel("<b>Pré-visualização (Arraste para cortar):</b>"))
+        # --- INSTRUÇÃO ATUALIZADA ---
+        right_layout.addWidget(QLabel("<b>Pré-visualização (Role=Zoom | Botão-Dir=Mover):</b>"))
         right_layout.addWidget(self.preview_label, 1)
         
         main_layout.addWidget(left_panel, 1)
         main_layout.addWidget(right_panel, 1)
 
-        # --- Conexões de Sinais ---
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         self.tool_button_group.buttonClicked.connect(self._mudar_modo_corte)
         self.btn_reset_selecao.clicked.connect(self.preview_label.reset_selection)
 
-        # --- Estado Inicial ---
-        self._mudar_modo_corte() # Define o texto de instrução inicial
+        self._mudar_modo_corte() 
         if self.caminho_original:
             self._atualizar_preview(self.caminho_original)
 
+    # --- MÉTODO ATUALIZADO (INSTRUÇÕES) ---
     @QtCore.Slot()
     def _mudar_modo_corte(self):
         """Atualiza o modo do CropLabel e o texto de instruções."""
@@ -412,7 +517,7 @@ class DialogoBrasao(QDialog):
             self.preview_label.set_mode('rect')
             self.info_label.setText(
                 "<b>Modo Retangular:</b>\n"
-                "1. Clique e arraste sobre a imagem para "
+                "1. Clique e arraste (botão esquerdo) sobre a imagem para "
                 "selecionar a área de corte."
             )
             self.btn_reset_selecao.setVisible(False)
@@ -420,10 +525,11 @@ class DialogoBrasao(QDialog):
             self.preview_label.set_mode('poly')
             self.info_label.setText(
                 "<b>Modo Poligonal:</b>\n"
-                "1. Clique para adicionar pontos de seleção.\n"
+                "1. Clique (botão esquerdo) para adicionar pontos.\n"
                 "2. Clique próximo ao <b>primeiro ponto</b> (verde) "
                 "para fechar a seleção.\n"
-                "3. Use 'Limpar Seleção' para recomeçar."
+                "3. Pressione <b>Ctrl+Z</b> para desfazer o último ponto.\n"
+                "4. Use 'Limpar Seleção' para recomeçar."
             )
             self.btn_reset_selecao.setVisible(True)
 
@@ -443,12 +549,8 @@ class DialogoBrasao(QDialog):
             
         pixmap = QtGui.QPixmap(caminho_imagem)
         self.preview_label.setOriginalPixmap(pixmap)
-        # self.preview_label.reset_selection() # setOriginalPixmap já faz isso
 
     def accept(self):
-        """
-        Sobrescreve o 'accept' para verificar o corte antes de fechar.
-        """
         if not self.caminho_original:
             QMessageBox.warning(self, "Arquivo Necessário", "Por favor, selecione um arquivo de imagem para o brasão.")
             return
@@ -471,7 +573,7 @@ class DialogoBrasao(QDialog):
         else: self.tamanho_cm = 3.0
 
         if not self._processar_imagem():
-            return # Não fecha o diálogo se o processamento falhar
+            return 
 
         super().accept()
 
@@ -495,49 +597,36 @@ class DialogoBrasao(QDialog):
 
             with Image.open(self.caminho_original) as img:
                 
-                # --- LÓGICA DE CORTE ATUALIZADA ---
-                
-                # Garante que a imagem suporte transparência para o corte poligonal
                 img = img.convert("RGBA") 
                 
                 dados_corte = self.preview_label.get_crop_coords()
                 
-                # Se o usuário fez uma seleção E não forçou usar a imagem inteira
                 if dados_corte and not self._usar_imagem_inteira:
                     
-                    # MODO 1: Corte Retangular (Simples)
                     if dados_corte['mode'] == 'rect':
                         print(f"Aplicando corte retangular: {dados_corte['coords']}")
                         img_cortada = img.crop(dados_corte['coords'])
                     
-                    # MODO 2: Corte Poligonal (Usando Máscara)
                     elif dados_corte['mode'] == 'poly':
                         print(f"Aplicando corte poligonal.")
                         
-                        # 1. Criar uma máscara alfa (preta) do tamanho da imagem
                         mask = Image.new("L", img.size, 0)
                         draw = ImageDraw.Draw(mask)
                         
-                        # 2. Desenhar o polígono (branco) na máscara
                         draw.polygon(dados_corte['coords'], fill=255)
                         
-                        # 3. Criar uma nova imagem de saída transparente
                         img_cortada = Image.new("RGBA", img.size)
                         
-                        # 4. Colar a imagem original na imagem final, usando a máscara
-                        # A máscara garante que apenas os pixels dentro do polígono sejam colados
                         img_cortada.paste(img, (0, 0), mask=mask)
                         
-                        # 5. Otimização: Recortar (crop) a transparência extra
-                        bbox = mask.getbbox() # Pega o bounding box da área branca
+                        bbox = mask.getbbox() 
                         if bbox:
                             img_cortada = img_cortada.crop(bbox)
                     
-                    img = img_cortada # Substitui a imagem original pela processada
+                    img = img_cortada 
 
                 else:
                     print("Usando imagem inteira (sem corte).")
-                # ---------------------------------
                 
                 # Redimensiona a imagem final (já cortada)
                 tamanho_max_px = 150 

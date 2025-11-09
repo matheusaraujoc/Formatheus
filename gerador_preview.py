@@ -1,11 +1,12 @@
 # gerador_preview.py
 # Descrição: Versão com lógica de quebra de palavras longas (word-break)
 # e CSS de alinhamento de brasão corrigido.
+# ATUALIZAÇÃO: Adicionada lógica para renderizar {{Lista:Titulo}}.
 
 import os
 import re
 import math
-from documento import DocumentoABNT, Capitulo
+from documento import DocumentoABNT, Capitulo, ItemLista # <--- ADICIONADO ItemLista
 from PIL import Image, ImageFont 
 
 # --- CONSTANTES DE ESTIMATIVA DE ALTURA (EM CM) ---
@@ -28,6 +29,7 @@ class GeradorHTMLPreview:
         self.contador_tabelas = 0
         self.contador_figuras = 0
         self.contador_formulas = 0
+        self.contador_listas = 0 # <--- NOVO CONTADOR
         self.classe_pagina_atual = 'pagina'
         self.is_artigo = self.doc_abnt.configuracoes.tipo_trabalho == "Artigo Científico"
 
@@ -169,10 +171,8 @@ class GeradorHTMLPreview:
                 numero_completo = f"{prefixo_numeracao}{i}"
                 nivel = len(numero_completo.split('.'))
 
-                # --- INÍCIO DA CORREÇÃO (Estimativa) ---
                 if nivel == 1 and i > 1:
                     simular_nova_pagina()
-                # --- FIM DA CORREÇÃO ---
 
                 pagina_prevista = pagina_atual
                 altura_necessaria_titulo = ALTURA_TITULO_SECAO + (ALTURA_LINHA_TEXTO * 2)
@@ -186,7 +186,7 @@ class GeradorHTMLPreview:
                 simular_adicao_bloco(ALTURA_TITULO_SECAO)
                 
                 if no_filho.conteudo:
-                    padrao = r"\{\{(?:(Tabela|Figura|Formula):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
+                    padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}" # <--- REGEX ATUALIZADO
                     partes = re.split(padrao, no_filho.conteudo)
                     is_continuacao_paragrafo = False
                     
@@ -199,7 +199,7 @@ class GeradorHTMLPreview:
                                 if paragrafo_texto.strip():
                                     simular_paragrafo_quebravel(paragrafo_texto, is_continuacao_paragrafo)
                                     is_continuacao_paragrafo = False 
-                                is_continuacao_paragrafo = False 
+                            is_continuacao_paragrafo = False 
                         else:
                             is_continuacao_paragrafo = False
 
@@ -225,6 +225,24 @@ class GeradorHTMLPreview:
                                         aspect_ratio = self._get_svg_aspect_ratio(obj.caminho_svg or obj.caminho_processado_png)
                                         altura_imagem_cm = obj.largura_cm * aspect_ratio
                                         simular_adicao_bloco(altura_imagem_cm + ALTURA_LEGENDA + 0.5) 
+                                
+                                # --- INÍCIO: LÓGICA DE ESTIMATIVA DA LISTA ---
+                                elif tipo_obj == "Lista":
+                                    obj = next((l for l in self.doc_abnt.banco_listas if l.titulo == titulo_obj), None)
+                                    if obj:
+                                        # Função auxiliar para contar itens
+                                        def contar_itens(item_lista: ItemLista) -> int:
+                                            count = len(item_lista.filhos)
+                                            for filho in item_lista.filhos:
+                                                count += contar_itens(filho)
+                                            return count
+                                        
+                                        num_itens = contar_itens(obj.raiz)
+                                        altura_estimada = num_itens * (ALTURA_LINHA_TEXTO * 1.1) # 1.1 para dar folga
+                                        if obj.mostrar_titulo:
+                                            altura_estimada += ALTURA_LEGENDA
+                                        simular_adicao_bloco(altura_estimada)
+                                # --- FIM: LÓGICA DE ESTIMATIVA DA LISTA ---
                             
                             elif comando:
                                 if comando == "QUEBRA_PAGINA":
@@ -304,7 +322,7 @@ class GeradorHTMLPreview:
                         texto_para_pagina_atual = texto_teste
                 
                 if indice_quebra == 0 and texto_para_pagina_atual:
-                     indice_quebra = len(palavras_paragrafo)
+                        indice_quebra = len(palavras_paragrafo)
 
                 if indice_quebra == 0 and len(palavras_paragrafo) > 0:
                     palavra_longa = palavras_paragrafo[0]
@@ -412,7 +430,6 @@ class GeradorHTMLPreview:
             .brasao-container {
                 min-height: 4cm; margin-bottom: 1cm;
                 display: flex; flex-direction: column; 
-                /* O 'justify-content' foi movido para as classes filhas */
             }
             .brasoes-lado-a-lado {
                 flex-direction: row; justify-content: space-between; align-items: center;
@@ -420,35 +437,58 @@ class GeradorHTMLPreview:
             .brasoes-lado-a-lado .instituicao-central { flex-grow: 1; padding: 0 1cm; }
             .brasao-container img { display: inline-block; margin: 0; max-height: 3.5cm; }
             
-            /* --- INÍCIO DA CORREÇÃO (ALINHAMENTO BRASÃO) --- */
-            /* 1. Alinha os *itens* (img, p) DENTRO do container flex */
             .brasao-centralizado { 
-                justify-content: center; /* Alinha verticalmente (para o caso de só ter o <p>) */
-                align-items: center; /* Alinha horizontalmente */ 
-                text-align: center; /* Fallback para o <p> */
+                justify-content: center; align-items: center; 
+                text-align: center; 
             }
             .brasao-esquerda { 
-                justify-content: center;
-                align-items: flex-start; /* Alinha horizontalmente à esquerda */ 
+                justify-content: center; align-items: flex-start; 
                 text-align: left;
             }
             .brasao-direita { 
-                justify-content: center;
-                align-items: flex-end; /* Alinha horizontalmente à direita */ 
+                justify-content: center; align-items: flex-end; 
                 text-align: right;
             }
-
-            /* 2. Alinha o container *em relação à página* (que é display: flex) */
-            /* Seleciona o primeiro 'div' filho da capa (que é o .brasao-container) */
             .pagina.capa > div:first-child {
-                align-self: stretch; /* Padrão: estica (bom para centralizado e lados) */
+                align-self: stretch; 
             }
-            /* Estas regras não são mais necessárias se o .brasao-container já é flex */
-            /* --- FIM DA CORREÇÃO --- */
-
             .pagina.pagina-em-branco::after {
                 content: ""; /* Remove o número da página */
             }
+            
+            /* --- INÍCIO: Estilos de Lista --- */
+            .pagina ol, .pagina ul {
+                text-align: justify;
+                margin-left: 1.25cm; /* Recuo padrão */
+                padding-left: 1.5em; /* Espaço para o marcador */
+                margin-top: 6px;
+                margin-bottom: 6px;
+            }
+            
+            /* Tipo: Híbrida (ABNT) */
+            ol.lista-abnt-nivel-1 { list-style-type: none; counter-reset: item; }
+            ol.lista-abnt-nivel-2 { list-style-type: none; counter-reset: item2; }
+            ol.lista-abnt-nivel-3 { list-style-type: none; counter-reset: item3; }
+            ol.lista-abnt-nivel-4 { list-style-type: disc; } /* Símbolo */
+            
+            ol.lista-abnt-nivel-1 > li { counter-increment: item; }
+            ol.lista-abnt-nivel-1 > li::marker { content: counter(item, lower-alpha) ") "; font-weight: normal; }
+            ol.lista-abnt-nivel-2 > li { counter-increment: item2; }
+            ol.lista-abnt-nivel-2 > li::marker { content: counter(item2, decimal) ") "; font-weight: normal; }
+            ol.lista-abnt-nivel-3 > li { counter-increment: item3; }
+            ol.lista-abnt-nivel-3 > li::marker { content: counter(item3, lower-roman) ") "; font-weight: normal; }
+
+            /* Tipo: Numérica (Seção) */
+            ol.lista-numerica { list-style-type: none; padding-left: 0.5em; margin-left: 0; }
+            ol.lista-numerica li { margin-left: 1.25cm; }
+            span.lista-numero-prefixo { margin-right: 0.5em; }
+
+            /* Tipo: Alfabética */
+            ol.lista-alfabetica { list-style-type: upper-alpha; }
+            
+            /* Tipo: Símbolos */
+            ul.lista-simbolos { list-style-type: disc; }
+            /* --- FIM: Estilos de Lista --- */
             
         </style>
         """
@@ -482,68 +522,53 @@ class GeradorHTMLPreview:
 
         return f"<!DOCTYPE html><html><head><meta charset='UTF-8'>{html_style}</head><body>{''.join(self.paginas_html)}</body></html>"
 
-    # --- INÍCIO DA CORREÇÃO (HTML DO CABEÇALHO) ---
     def _renderizar_cabecalho_capa_html(self, cfg):
         posicao = cfg.posicao_brasao
         instituicao_html = f'<p class="bloco-texto-capa"><strong>{cfg.instituicao.upper()}</strong></p>'
 
-        # --- Caso 1: Nenhum (Funciona) ---
         if posicao == "Nenhum": 
             return f'<div class="brasao-container brasao-centralizado">{instituicao_html}</div>'
 
-        # --- Caso 2: Acima do Nome (Funciona) ---
         if posicao == "Acima do Nome":
             brasao_html = ""
-            classe_css_container = "brasao-centralizado" # Classe no container
+            classe_css_container = "brasao-centralizado" 
             if cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
                 url = f"file:///{os.path.abspath(cfg.caminho_brasao_esquerdo_processado).replace(os.path.sep, '/')}"
                 brasao_html = f'<img src="{url}" style="width:{cfg.tamanho_brasao_esquerdo_cm}cm; margin-bottom: 1cm;"><br>'
             
-            # A classe .brasao-centralizado no container e o text-align: center no <p> (padrão da capa) resolvem
             return f'<div class="brasao-container {classe_css_container}"><p class="bloco-texto-capa">{brasao_html}<strong>{cfg.instituicao.upper()}</strong></p></div>'
 
-        # --- INÍCIO DA CORREÇÃO ---
-        # --- Casos 3, 4, 5: Lados, Apenas Esquerdo, Apenas Direito ---
-        # Todos usam o layout 'brasoes-lado-a-lado', mas com divs vazias.
-
-        html_esq = "<div></div>" # Placeholder (para manter o alinhamento)
-        html_dir = "<div></div>" # Placeholder (para manter o alinhamento)
+        html_esq = "<div></div>" 
+        html_dir = "<div></div>" 
         
-        # Preenche o lado esquerdo se for "Lados" OU "Apenas Esquerdo"
         if (posicao == "Lados (Esquerdo e Direito)" or posicao == "Apenas Esquerdo"):
             if cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
                 url_esq = f"file:///{os.path.abspath(cfg.caminho_brasao_esquerdo_processado).replace(os.path.sep, '/')}"
                 html_esq = f'<div><img src="{url_esq}" style="width:{cfg.tamanho_brasao_esquerdo_cm}cm;"></div>'
         
-        # Preenche o lado direito se for "Lados" OU "Apenas Direito"
         if (posicao == "Lados (Esquerdo e Direito)" or posicao == "Apenas Direito"):
             if cfg.caminho_brasao_direito_processado and os.path.exists(cfg.caminho_brasao_direito_processado):
                 url_dir = f"file:///{os.path.abspath(cfg.caminho_brasao_direito_processado).replace(os.path.sep, '/')}"
                 html_dir = f'<div><img src="{url_dir}" style="width:{cfg.tamanho_brasao_direito_cm}cm;"></div>'
 
-        # O HTML da instituição fica no meio
         instituicao_div = f'<div class="instituicao-central">{instituicao_html}</div>'
         
-        # Retorna o layout de 3 colunas para TODOS os casos de "lado"
         return f'<div class="brasao-container brasoes-lado-a-lado">{html_esq}{instituicao_div}{html_dir}</div>'
-    # --- FIM DA CORREÇÃO ---
 
     def _renderizar_secoes_recursivamente_html(self, no_pai: Capitulo, prefixo_numeracao=""):
         for i, no_filho in enumerate(no_pai.filhos, 1):
             numero_completo = f"{prefixo_numeracao}{i}"
             nivel = len(numero_completo.split('.'))
 
-            # --- INÍCIO DA CORREÇÃO (Renderização) ---
             if nivel == 1 and i > 1:
                 self._nova_pagina()
-            # --- FIM DA CORREÇÃO ---
             
             titulo_texto = f"{numero_completo} {no_filho.titulo.upper() if nivel == 1 and not self.is_artigo else no_filho.titulo}"
             id_ancora = f"secao-{numero_completo.replace('.', '-')}"
             self._adicionar_elemento_bloco(f"<h1 id='{id_ancora}'>{titulo_texto}</h1>", ALTURA_TITULO_SECAO)
             
             if no_filho.conteudo:
-                padrao = r"\{\{(?:(Tabela|Figura|Formula):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
+                padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}" # <--- REGEX ATUALIZADO
                 partes = re.split(padrao, no_filho.conteudo)
                 
                 is_continuacao_paragrafo = False
@@ -595,6 +620,19 @@ class GeradorHTMLPreview:
                                     altura_total_bloco = altura_imagem_cm + ALTURA_LEGENDA
                                     self._adicionar_elemento_bloco(self._renderizar_formula_html(obj), altura_total_bloco)
                             
+                            # --- INÍCIO: LÓGICA DE RENDERIZAÇÃO DA LISTA ---
+                            elif tipo_obj == "Lista":
+                                obj = next((l for l in self.doc_abnt.banco_listas if l.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_listas += 1; obj.numero = self.contador_listas
+                                    def contar_itens(item_lista: ItemLista) -> int:
+                                        count = len(item_lista.filhos);
+                                        for filho in item_lista.filhos: count += contar_itens(filho)
+                                        return count
+                                    altura = (contar_itens(obj.raiz) * (ALTURA_LINHA_TEXTO * 1.1)) + (ALTURA_LEGENDA if obj.mostrar_titulo else 0)
+                                    self._adicionar_elemento_bloco(self._renderizar_lista_html(obj), altura)
+                            # --- FIM: LÓGICA DE RENDERIZAÇÃO DA LISTA ---
+                            
                         elif comando:
                             if comando == "QUEBRA_PAGINA":
                                 self._nova_pagina()
@@ -608,8 +646,62 @@ class GeradorHTMLPreview:
                         is_continuacao_paragrafo = False
                     
                     idx += 4
-                                
+                            
             self._renderizar_secoes_recursivamente_html(no_filho, f"{numero_completo}.")
+    
+    # --- INÍCIO: NOVO MÉTODO PARA RENDERIZAR LISTA HTML ---
+    def _get_lista_css_class(self, tipo_enumeracao: str, nivel: int) -> str:
+        """Retorna a classe CSS para o tipo de lista."""
+        if tipo_enumeracao == "Híbrida (ABNT)":
+            return f"lista-abnt-nivel-{nivel}"
+        if tipo_enumeracao == "Numérica (Seção)":
+            return "lista-numerica"
+        if tipo_enumeracao == "Alfabética":
+            return "lista-alfabetica"
+        if tipo_enumeracao == "Símbolos":
+            return "lista-simbolos"
+        return ""
+
+    def _renderizar_lista_html(self, lista_obj) -> str: # O tipo é ListaABNT
+        """Gera o HTML para uma ListaABNT."""
+        html_final = "<div>"
+        
+        if lista_obj.mostrar_titulo:
+            html_final += f'<p class="legenda">Lista {lista_obj.numero} – {lista_obj.titulo}</p>'
+
+        def render_itens_recursivo(item_pai: ItemLista, nivel: int, prefixo_numerico: str) -> str:
+            if not item_pai.filhos:
+                return ""
+
+            # Define se é <ol> ou <ul> e a classe CSS
+            tag = "ol"
+            classe_css = self._get_lista_css_class(lista_obj.tipo_enumeracao, nivel)
+            if lista_obj.tipo_enumeracao == "Símbolos":
+                tag = "ul"
+                
+            html_lista = f'<{tag} class="{classe_css}">'
+            
+            for i, item_filho in enumerate(item_pai.filhos):
+                texto_item = item_filho.texto
+                
+                # Adiciona o prefixo numérico se for o caso
+                if lista_obj.tipo_enumeracao == "Numérica (Seção)":
+                    numero_item = f"{prefixo_numerico}{i+1}."
+                    texto_item = f'<span class="lista-numero-prefixo">{numero_item}</span> {texto_item}'
+                
+                html_lista += f'<li>{texto_item}'
+                # Chama recursivamente para os filhos
+                html_lista += render_itens_recursivo(item_filho, nivel + 1, f"{prefixo_numerico}{i+1}.")
+                html_lista += '</li>'
+                
+            html_lista += f'</{tag}>'
+            return html_lista
+
+        # Inicia a recursão
+        html_final += render_itens_recursivo(lista_obj.raiz, 1, "")
+        html_final += "</div>"
+        return html_final
+    # --- FIM: NOVO MÉTODO ---
     
     def _renderizar_capa_html(self, cfg, autores_html):
         cabecalho_html = self._renderizar_cabecalho_capa_html(cfg)

@@ -1,6 +1,7 @@
 # gerador_docx.py
 # Descrição: Versão com a correção do recuo (TAB) na primeira
 # linha do Resumo.
+# ATUALIZAÇÃO: Adicionada lógica para renderizar {{Lista:Titulo}}.
 
 import os
 import re
@@ -19,7 +20,7 @@ except ImportError:
     WIN32_AVAILABLE = False
     print("AVISO: Biblioteca 'pywin32' não encontrada. A automação do sumário será desativada.")
 
-from documento import DocumentoABNT, Capitulo
+from documento import DocumentoABNT, Capitulo, ItemLista, ListaABNT # <--- ADICIONADO ItemLista, ListaABNT
 from normas_abnt import MotorNormasABNT
 
 def adicionar_sumario(doc, paragrafo_placeholder):
@@ -56,6 +57,7 @@ class GeradorDOCX:
         self.contador_tabelas = 0
         self.contador_figuras = 0
         self.contador_formulas = 0
+        self.contador_listas = 0 # <--- NOVO CONTADOR
 
     def _atualizar_sumario_com_word(self, caminho_arquivo):
         if not WIN32_AVAILABLE:
@@ -154,18 +156,15 @@ class GeradorDOCX:
             numero_completo = f"{prefixo_numeracao}{i}"
             nivel_titulo = len(numero_completo.split('.'))
             
-            # --- INÍCIO DA CORREÇÃO ---
             # Se for um capítulo de Nível 1 (ex: "2", "3", etc.) E não for o
             # primeiro capítulo (i > 1), força uma quebra de página.
             if nivel_titulo == 1 and i > 1:
                 self.doc.add_page_break()
-            # --- FIM DA CORREÇÃO ---
             
             self.regras.aplicar_estilo_titulo_secao(self.doc, numero_completo, no_filho.titulo, nivel=nivel_titulo)
 
             if no_filho.conteudo:
-                # O regex corrigido da última vez:
-                padrao = r"\{\{(?:(Tabela|Figura|Formula):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
+                padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}" # <--- REGEX ATUALIZADO
                 partes = re.split(padrao, no_filho.conteudo)
 
                 idx = 0
@@ -202,6 +201,15 @@ class GeradorDOCX:
                                     self.contador_formulas += 1
                                     obj.numero = self.contador_formulas
                                     self._renderizar_formula(obj)
+                            
+                            # --- INÍCIO: LÓGICA DE RENDERIZAÇÃO DA LISTA ---
+                            elif tipo_obj == "Lista":
+                                obj = next((l for l in self.doc_abnt.banco_listas if l.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_listas += 1
+                                    obj.numero = self.contador_listas
+                                    self._renderizar_lista(obj)
+                            # --- FIM: LÓGICA DE RENDERIZAÇÃO DA LISTA ---
                         
                         elif comando:
                             if comando == "QUEBRA_PAGINA":
@@ -241,8 +249,6 @@ class GeradorDOCX:
                 run.font.size = self.regras.TAMANHO_FONTE_LEGENDA
                 run.font.color.rgb = self.regras.COR_FONTE_PADRAO
                 
-                # --- INÍCIO DA CORREÇÃO ---
-                
                 # 1. Cabeçalho (linha 0) é SEMPRE centralizado
                 if i == 0:
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -252,10 +258,7 @@ class GeradorDOCX:
                     if tabela_obj.centralizar_conteudo:
                         p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                     else:
-                        # DEVE SER EXPLÍCITO para anular a centralização anterior
                         p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-                
-                # --- FIM DA CORREÇÃO ---
 
         if tabela_obj.estilo_borda == 'abnt':
             self.regras.aplicar_estilo_tabela_abnt(t)
@@ -264,9 +267,6 @@ class GeradorDOCX:
             p_fonte = self.doc.add_paragraph()
             p_fonte.add_run(f"Fonte: {tabela_obj.fonte}")
             self.regras.aplicar_estilo_legenda(p_fonte, is_titulo=False)
-
-        if tabela_obj.estilo_borda == 'abnt':
-            self.regras.aplicar_estilo_tabela_abnt(t)
 
     def _renderizar_figura(self, figura_obj):
         p_titulo = self.doc.add_paragraph()
@@ -327,6 +327,102 @@ class GeradorDOCX:
         p_legenda.paragraph_format.space_before = Pt(6)
         p_legenda.paragraph_format.space_after = Pt(12)
 
+    # --- INÍCIO: NOVOS MÉTODOS PARA RENDERIZAR LISTA DOCX ---
+
+    def _get_marcador_lista(self, tipo: str, nivel: int, indice: int, prefixo_num: str) -> tuple[str, str]:
+        """
+        Retorna o marcador (ex: "a)") e o prefixo numérico para o próximo nível.
+        """
+        if tipo == "Híbrida (ABNT)":
+            if nivel == 1: return f"{self._get_char_alfabetico(indice)})", "" # a)
+            if nivel == 2: return f"{indice + 1})", ""                      # 1)
+            if nivel == 3: return f"{self._get_char_romano(indice)}", ""     # i)
+            return "-", ""                                                  # -
+        
+        if tipo == "Numérica (Seção)":
+            num_atual = f"{prefixo_num}{indice + 1}."
+            return num_atual, num_atual # Retorna o num_atual como prefixo para os filhos
+            
+        if tipo == "Alfabética":
+            return f"{self._get_char_alfabetico(indice, maiusculo=True)}.", "" # A.
+            
+        if tipo == "Símbolos":
+            return "•", "" # • (ou "-")
+            
+        return "", ""
+
+    def _get_char_alfabetico(self, indice: int, maiusculo: bool = False) -> str:
+        """Retorna 'a' para 0, 'b' para 1, etc."""
+        offset = 65 if maiusculo else 97
+        return chr(offset + indice)
+        
+    def _get_char_romano(self, indice: int) -> str:
+        """Retorna 'i' para 0, 'ii' para 1, etc. (simplificado)"""
+        romanos = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x']
+        return romanos[indice] if indice < len(romanos) else str(indice + 1)
+
+
+    def _renderizar_lista(self, lista_obj: ListaABNT):
+        """Renderiza a lista hierárquica no DOCX."""
+        
+        if lista_obj.mostrar_titulo:
+            p_titulo = self.doc.add_paragraph()
+            p_titulo.add_run(f"Lista {lista_obj.numero} – {lista_obj.titulo}")
+            self.regras.aplicar_estilo_legenda(p_titulo, is_titulo=True)
+            p_titulo.paragraph_format.keep_with_next = True
+
+        def render_itens_recursivo(item_pai: ItemLista, nivel: int, prefixo_num: str):
+            # Recuo = Recuo padrão (1.25cm) + recuo do nível (0.75cm por nível)
+            recuo_base_cm = 1.25
+            recuo_nivel_cm = 0.75
+            
+            # Recuo total para o texto do item
+            recuo_total_cm = recuo_base_cm + (nivel * recuo_nivel_cm)
+            # Recuo do marcador (um pouco menos que o texto)
+            recuo_marcador_cm = recuo_base_cm + ((nivel - 1) * recuo_nivel_cm)
+
+            # Caso especial: Listas Numéricas (Seção) têm recuo 0
+            if lista_obj.tipo_enumeracao == "Numérica (Seção)":
+                recuo_total_cm = 1.25 # Recuo padrão de parágrafo
+                recuo_marcador_cm = 0
+
+            for i, item_filho in enumerate(item_pai.filhos):
+                marcador, proximo_prefixo = self._get_marcador_lista(
+                    lista_obj.tipo_enumeracao, nivel, i, prefixo_num
+                )
+                
+                p = self.doc.add_paragraph()
+                p.style = 'Normal' # Garante o espaçamento 1.5
+                p.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
+                
+                # Aplica o recuo e o "hanging indent"
+                p.paragraph_format.left_indent = Cm(recuo_total_cm)
+                
+                # O recuo negativo da primeira linha (hanging) coloca o marcador
+                # para a esquerda do texto.
+                p.paragraph_format.first_line_indent = -Cm(recuo_total_cm - recuo_marcador_cm)
+                
+                # Adiciona o marcador (ex: "a)\t")
+                if lista_obj.tipo_enumeracao == "Numérica (Seção)":
+                    # Em listas numéricas, o marcador faz parte do texto
+                    run = p.add_run(f"{marcador} {item_filho.texto}")
+                    self.regras._aplicar_formatacao_run(run) # Aplica fonte/tamanho
+                else:
+                    # Em listas ABNT, usamos um TAB
+                    run_marcador = p.add_run(f"{marcador}\t")
+                    self.regras._aplicar_formatacao_run(run_marcador)
+                    
+                    run_texto = p.add_run(item_filho.texto)
+                    self.regras._aplicar_formatacao_run(run_texto)
+                
+                # Chama recursivamente para os filhos
+                render_itens_recursivo(item_filho, nivel + 1, proximo_prefixo)
+
+        # Inicia a recursão (começa no nível 1)
+        render_itens_recursivo(lista_obj.raiz, 1, "")
+        
+    # --- FIM: NOVO MÉTODO ---
+
     def _set_page_numbering(self, section):
         section.header.is_linked_to_previous = False
         header_p = section.header.paragraphs[0]
@@ -343,7 +439,6 @@ class GeradorDOCX:
         fldChar_end.set(qn('w:fldCharType'), 'end')
         run._r.append(fldChar_end)
 
-    # --- FUNÇÃO _renderizar_capa ATUALIZADA (SEM TABELA) ---
     def _renderizar_capa(self):
         cfg = self.doc_abnt.configuracoes
         
@@ -392,7 +487,6 @@ class GeradorDOCX:
         p_final.add_run(f"{cfg.cidade.upper()}\n{cfg.ano}")
 
 
-    # --- FUNÇÃO _renderizar_folha_rosto ATUALIZADA (SEM TABELA) ---
     def _renderizar_folha_rosto(self, section):
         cfg = self.doc_abnt.configuracoes
         
@@ -428,18 +522,14 @@ class GeradorDOCX:
         p_final.add_run(f"{cfg.cidade.upper()}\n{cfg.ano}")
 
     
-    # --- FUNÇÃO _renderizar_resumo ATUALIZADA (COM CORREÇÃO DO TAB) ---
     def _renderizar_resumo(self):
         self.regras.aplicar_estilo_titulo_secao(self.doc, numero="", titulo_texto="RESUMO")
         
         p_resumo = self.doc.add_paragraph()
         self.regras.aplicar_estilo_resumo(p_resumo, self.doc_abnt.resumo)
         
-        # --- CORREÇÃO (Bug do Recuo do Resumo) ---
-        # Adiciona o recuo da primeira linha, pois a ABNT exige que o
-        # resumo seja um parágrafo único (e parágrafos têm recuo).
+        # Adiciona o recuo da primeira linha
         p_resumo.paragraph_format.first_line_indent = self.regras.RECUO_PRIMEIRA_LINHA
-        # --- FIM DA CORREÇÃO ---
 
         self.doc.add_paragraph() # Espaçamento entre Resumo e Palavras-chave
         
