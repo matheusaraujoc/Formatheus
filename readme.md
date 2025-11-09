@@ -701,7 +701,7 @@ def accept(self):
       * Ela permite que o mesmo diálogo seja usado tanto para **Criar** (quando `tabela` é `None`) quanto para **Editar** (quando `tabela` é fornecida). Ao criar, ele já fornece uma tabela 2x2 padrão para que o `QTableWidget` não apareça vazio, melhorando a experiência do usuário.
 
 
-## Documentação: `DialogoFormula.py`
+## Documentação: `dialogo_formula.py`
 
 Este módulo é, sem dúvida, o mais complexo tecnicamente em toda a aplicação, pois ele atua como uma "ponte" entre três mundos diferentes: a sua aplicação desktop (PySide6), um navegador web embarcado (WebEngine), e um renderizador JavaScript (MathJax).
 
@@ -769,6 +769,117 @@ O fluxo de salvamento deste diálogo é o processo mais complexo de toda a aplic
     * Isso é um "calcanhar de Aquiles" clássico. O código LaTeX (que contém `\`, `\n`, `'`) precisa ser "escapado" para poder ser inserido com segurança *dentro* de uma string JavaScript (`window.setEditorContent('...')`). Se uma fórmula usar um caractere que não foi previsto (como aspas duplas `"`), ela quebrará a string JS e a fórmula não será carregada. Uma solução 100% robusta seria passar o código como JSON.
 * **"Gambiarra": Caminho da Fonte (em `gerador_preview.py`, mas relevante aqui)**
     * O código `_carregar_fonte_medidora` no `gerador_preview.py` assume que a fonte `times.ttf` está em `C:/Windows/Fonts/`. Isso é uma "gambiarra" que só funciona em Windows e falhará em macOS ou Linux. A solução correta (mas muito mais complexa) seria empacotar o arquivo `.ttf` com o programa ou usar a biblioteca `matplotlib.font_manager` para encontrar a fonte no sistema.
+
+
+## 📄 Documentação Detalhada: `dialogo_lista.py`
+
+### 1. Visão Geral
+
+O arquivo `dialogo_lista.py` define a classe `ListaDialog`, uma janela de diálogo modal (`QDialog`) projetada especificamente para a criação e edição de objetos `ListaABNT`.
+
+Esta janela gerencia duas responsabilidades principais:
+1.  **Configuração de Metadados:** Permite ao usuário definir o **título** (identificador único), o **tipo de enumeração** (ABNT, Numérica, etc.) e se o título deve ser visível no documento final.
+2.  **Edição Estrutural:** Fornece um editor em árvore (`QTreeWidget`) que permite ao usuário criar, editar, remover e reordenar (`drag-and-drop`) os itens hierárquicos (`ItemLista`) que compõem a lista.
+
+A classe é crucial para desacoplar a lógica de edição de listas da `aba_conteudo`, fornecendo uma interface de usuário focada e reutilizável.
+
+### 2. Dependências
+
+* **PySide6:** Utiliza vários componentes da biblioteca Qt para a interface gráfica, incluindo `QDialog`, `QTreeWidget`, `QLineEdit`, `QComboBox`, `QCheckBox`, e `QDialogButtonBox`.
+* **documento.py:** Depende fundamentalmente das classes de modelo de dados `ListaABNT` (o contêiner da lista) e `ItemLista` (os nós individuais da árvore).
+
+---
+
+### 3. Análise da Classe `ListaDialog`
+
+A classe `ListaDialog` é a única classe neste arquivo e herda de `QDialog`.
+
+#### 3.1. Atributos Principais
+
+* `self.lista` (ListaABNT): O objeto de dados **"em trabalho"**. Se for uma nova lista, é uma nova instância. Se for uma edição, é o mesmo objeto passado para o construtor. Todos os widgets da UI (campos de texto, árvore) são populados a partir deste objeto e, ao salvar, atualizam este objeto.
+* `self.lista_original_para_edicao` (ListaABNT | None): Armazena uma **referência** ao objeto `lista_existente` original passado no construtor. É usado **exclusivamente** no método `accept()` para a verificação de duplicidade, permitindo diferenciar entre "salvar com o mesmo nome" (permitido) e "salvar com um nome que conflita com *outra* lista" (proibido).
+* `self.banco_listas` (list[ListaABNT]): Uma referência à lista completa de *todas* as listas do documento. É usado **exclusivamente** no método `accept()` para verificar se o novo título já existe.
+* `self.arvore_itens` (QTreeWidget): O componente visual (a **View**) que exibe a hierarquia dos `ItemLista`. O usuário interage diretamente com este widget.
+
+#### 3.2. Método `__init__` (Construtor)
+
+O construtor configura o diálogo, distinguindo entre o modo de "criação" e "edição".
+
+* **Parâmetros:**
+    * `lista_existente` (ListaABNT | None): Se `None`, o diálogo entra em modo de **criação**. Se um objeto `ListaABNT` é fornecido, entra em modo de **edição**.
+    * `banco_listas` (list[ListaABNT] | None): A lista completa de listas do projeto, necessária para a validação de duplicidade de título.
+* **Lógica de Inicialização:**
+    1.  **Gerenciamento de Estado:** Armazena `lista_existente` em `self.lista_original_para_edicao` e `banco_listas` em `self.banco_listas`.
+    2.  **Criação/Edição:** Define `self.lista` (o objeto de trabalho). Se for uma nova lista (`lista_existente` é `None`), ele também adiciona um `ItemLista` padrão ("Item a)") para que o usuário não comece com uma árvore vazia.
+    3.  **Construção da UI (Layout):** O layout é dividido em 4 seções:
+        * **Seção 1 (Formulário):** `titulo_input`, `mostrar_titulo_check`, e `tipo_enumeracao_combo`. Seus valores iniciais são lidos de `self.lista`.
+        * **Seção 2 (Árvore):** O `QTreeWidget` (`self.arvore_itens`) é configurado.
+            * `setDragDropMode(InternalMove)`: Permite que o usuário arraste e solte itens *dentro* da árvore para reordená-los.
+            * `setSelectionMode(SingleSelection)`: Garante que apenas um item possa ser selecionado por vez.
+            * `popular_arvore_widget()`: É chamado para preencher a árvore com base no modelo `self.lista.raiz`.
+            * `itemDoubleClicked`: Conectado ao slot `editar_item` para facilitar a edição.
+        * **Seção 3 (Botões da Árvore):** Botões para "Adicionar Item", "Adicionar Subitem", "Editar Item" e "Remover Item", conectados aos seus respectivos slots.
+        * **Seção 4 (OK/Cancelar):** Um `QDialogButtonBox` padrão. O sinal `accepted` é conectado ao método `accept()`, que contém toda a lógica de validação.
+
+---
+
+### 4. Fluxo de Dados: Modelo ⇔ View
+
+A parte mais complexa deste diálogo é a sincronização entre o modelo de dados (`ItemLista`) e a visualização (`QTreeWidget`).
+
+#### 4.1. `popular_arvore_widget(self)` (Modelo -> View)
+
+* **Propósito:** Lê a estrutura de dados (o `ItemLista` aninhado dentro de `self.lista.raiz`) e a "desenha" no `QTreeWidget`.
+* **Como funciona:**
+    1.  Usa uma função recursiva interna `adicionar_filhos_recursivo`.
+    2.  Para cada `filho_modelo` (`ItemLista`) no `no_pai_modelo`, ele cria um `item_widget` (`QTreeWidgetItem`).
+    3.  **PONTO-CHAVE:** A linha `item_widget.setData(0, QtCore.Qt.ItemDataRole.UserRole, filho_modelo)` armazena uma **referência direta** ao objeto do modelo (`ItemLista`) dentro do item da view (`QTreeWidgetItem`).
+    4.  Isso permite que, ao interagir com a view (ex: clicar em "Editar"), possamos recuperar instantaneamente o objeto de dados correspondente.
+
+#### 4.2. `_construir_modelo_da_arvore(self)` (View -> Modelo)
+
+* **Propósito:** Faz o oposto. Lê a estrutura *visual* atual do `self.arvore_itens` (que pode ter sido modificada por `drag-and-drop` ou remoções) e constrói um **novo** objeto `ItemLista` (modelo) que reflete essa estrutura.
+* **Como funciona:**
+    1.  Cria uma `nova_raiz_modelo` vazia.
+    2.  Usa uma função recursiva `percorrer_arvore_ui` que itera pelos itens do `QTreeWidget`.
+    3.  Para cada `child_item_widget` (da view), ele recupera o `child_node_modelo` (o `ItemLista`) que foi armazenado usando `item.data()`.
+    4.  **PONTO-CHAVE:** Ele limpa os filhos do modelo (`child_node_modelo.filhos.clear()`) porque a estrutura atual da **View** é agora a "fonte da verdade".
+    5.  Ele reconstrói a hierarquia do modelo chamando `parent_node_modelo.adicionar_filho(child_node_modelo)` na nova ordem.
+    6.  Retorna a `nova_raiz_modelo` preenchida, que substituirá a `self.lista.raiz` original.
+
+---
+
+### 5. Métodos Principais (Slots)
+
+#### 5.1. Slots de Edição da Árvore
+
+* `adicionar_item_raiz(self)` / `adicionar_item_filho(self)`: Criam tanto o `ItemLista` (modelo) quanto o `QTreeWidgetItem` (view), ligam um ao outro com `setData` e os adicionam à árvore (no nível raiz ou como filho do item selecionado, respectivamente). Em seguida, chamam `editar_item()` para uma experiência de usuário fluida.
+* `editar_item(self, item_widget)`: Recupera o `ItemLista` do `item_widget` usando `item.data()`. Abre um `QInputDialog` para obter o novo texto. Se válido, atualiza **ambos**: `item_modelo.texto` e `item_widget.setText()`.
+* `remover_item(self)`: Remove o `QTreeWidgetItem` selecionado da *view* (`self.arvore_itens`). A remoção do modelo de dados só é efetivada quando `_construir_modelo_da_arvore` é chamado durante o `accept()`.
+
+#### 5.2. `accept(self)` (Validação e Salvamento)
+
+Este é o método mais crítico. Ele é acionado quando o usuário clica em "OK" e **impede o fechamento do diálogo** se qualquer validação falhar.
+
+O fluxo de execução é:
+1.  **Validar Título Vazio:** Pega o `titulo_input`. Se estiver vazio, exibe um `QMessageBox.warning` e `return` (o diálogo permanece aberto).
+2.  **Validar Duplicidade de Título:**
+    * Pega o `novo_titulo`.
+    * Itera por `self.banco_listas` (fornecido no `__init__`).
+    * Se um `lista_existente` tem o mesmo título (ignorando maiúsculas/minúsculas):
+        * Verifica se `lista_existente` é **o mesmo objeto** que `self.lista_original_para_edicao`.
+        * Se **sim** (é o mesmo objeto), o usuário está apenas salvando. O loop continua (`continue`).
+        * Se **não** (é um objeto diferente), o título colide com outra lista. Exibe `QMessageBox.warning` e `return` (o diálogo permanece aberto).
+3.  **Sincronizar Dados:** Se as validações de título passarem:
+    * Atualiza os atributos simples em `self.lista` (título, mostrar_titulo, tipo_enumeracao).
+    * Chama `self.lista.raiz = self._construir_modelo_da_arvore()` para salvar a estrutura da árvore (View) de volta no Modelo.
+4.  **Validar Lista Vazia:** Verifica se `self.lista.raiz.filhos` está vazio (o que aconteceria se o usuário removesse todos os itens). Se estiver, exibe `QMessageBox.warning` e `return` (o diálogo permanece aberto).
+5.  **Fechar Diálogo:** Se todas as validações passarem, chama `super().accept()` para fechar o diálogo com um status "Aceito".
+
+#### 5.3. `get_dados_lista(self)` (Método de Acesso)
+
+* **Propósito:** Método público chamado pelo `aba_conteudo` *após* o diálogo ser fechado com sucesso (via `accept()`).
+* **Retorno:** Retorna o objeto `self.lista`, que agora está validado e totalmente atualizado com os metadados e a nova estrutura da árvore.
 
 
 ## Documentação: `dialogs.py`
