@@ -2,6 +2,8 @@
 # Descrição: Janela de diálogo para adicionar e editar figuras.
 # MODIFICAÇÃO: Corrigida a lógica de "pan" (mover) para
 # renderizar (desenhar) a imagem na posição correta.
+# ATUALIZAÇÃO: Adicionada verificação de título duplicado
+# no método accept() para evitar bugs de referência.
 
 import os
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -409,12 +411,20 @@ class CropLabel(QLabel):
 # =============================================================================
 
 class DialogoFigura(QDialog):
-    def __init__(self, figura: Figura = None, parent: QWidget = None):
+    
+    # --- INÍCIO DA MODIFICAÇÃO (Adiciona banco_figuras) ---
+    def __init__(self, figura: Figura = None, banco_figuras: list[Figura] = None, parent: QWidget = None):
+    # --- FIM DA MODIFICAÇÃO ---
+        
         super().__init__(parent)
         self.setWindowTitle("Editor de Figura ABNT (com Recorte)")
         self.setMinimumSize(700, 600)
 
+        # --- INÍCIO DA MODIFICAÇÃO (Armazena dependências) ---
+        self.figura_original_para_edicao = figura
         self.figura = figura if figura else Figura()
+        self.banco_figuras = banco_figuras if banco_figuras else []
+        # --- FIM DA MODIFICAÇÃO ---
 
         main_layout = QHBoxLayout(self)
         
@@ -555,15 +565,37 @@ class DialogoFigura(QDialog):
         super().resizeEvent(event)
 
     def accept(self):
-        if not self.titulo_input.text():
+        
+        # --- INÍCIO DA MODIFICAÇÃO (Verificação de Duplicidade) ---
+        novo_titulo = self.titulo_input.text().strip()
+        
+        if not novo_titulo:
             QMessageBox.warning(self, "Campo Obrigatório", "O campo 'Título' não pode estar vazio.")
             return
+
+        # Compara com todas as figuras no banco
+        for fig_existente in self.banco_figuras:
+            # 1. Compara o título (ignorando maiúsculas/minúsculas e espaços)
+            if fig_existente.titulo.strip().lower() == novo_titulo.lower():
+                
+                # 2. Verifica se a figura encontrada é A MESMA que estamos editando.
+                # Se for a mesma (mesmo objeto), permite salvar (ignora a checagem).
+                if self.figura_original_para_edicao is fig_existente:
+                    continue 
+
+                # 3. Se for uma figura DIFERENTE com o mesmo nome, bloqueia.
+                QMessageBox.warning(self, "Título Duplicado", 
+                                    f"Já existe uma figura com o título '{novo_titulo}'.\n"
+                                    "O título da figura deve ser único.")
+                return # Não fecha o diálogo
+        # --- FIM DA MODIFICAÇÃO ---
         
         if not self.caminho_input.text():
             QMessageBox.warning(self, "Campo Obrigatório", "Por favor, selecione um 'Arquivo da Imagem'.")
             return
             
-        self.figura.titulo = self.titulo_input.text()
+        # Salva o título já tratado
+        self.figura.titulo = novo_titulo
         self.figura.fonte = self.fonte_input.text()
         self.figura.caminho_original = self.caminho_input.text()
 

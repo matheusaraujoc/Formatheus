@@ -1,6 +1,8 @@
 # dialogo_lista.py
 # Descrição: Janela de diálogo para a criação e edição de listas hierárquicas.
 # CORREÇÃO: Corrigido o enum na linha 51 (de DragDropMode para SelectionMode).
+# ATUALIZAÇÃO: Adicionada verificação de título duplicado
+# no método accept() para evitar bugs de referência.
 
 from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QLineEdit, QComboBox,
@@ -11,13 +13,22 @@ from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QLineEdit, QComboBox,
 from documento import ListaABNT, ItemLista, TipoEnumeracaoLista
 
 class ListaDialog(QDialog):
-    def __init__(self, lista_existente: ListaABNT = None, parent: QWidget = None):
+    
+    # --- INÍCIO DA MODIFICAÇÃO (Adiciona banco_listas) ---
+    def __init__(self, lista_existente: ListaABNT = None, banco_listas: list[ListaABNT] = None, parent: QWidget = None):
+    # --- FIM DA MODIFICAÇÃO ---
+        
         super().__init__(parent)
         self.setWindowTitle("Editor de Lista ABNT")
         self.setMinimumSize(700, 500)
 
+        # --- INÍCIO DA MODIFICAÇÃO (Armazena dependências) ---
         # Se estamos editando, usamos o objeto existente. Se for novo, criamos um.
+        self.lista_original_para_edicao = lista_existente
         self.lista = lista_existente if lista_existente else ListaABNT(titulo="")
+        self.banco_listas = banco_listas if banco_listas else []
+        # --- FIM DA MODIFICAÇÃO ---
+
         if not self.lista.raiz.filhos and not lista_existente:
              # Garante que uma lista nova tenha pelo menos um item
              self.lista.raiz.adicionar_filho(ItemLista(texto="Item a)"))
@@ -240,14 +251,33 @@ class ListaDialog(QDialog):
 
     def accept(self):
         """Valida e salva os dados antes de fechar."""
-        titulo = self.titulo_input.text().strip()
-        if not titulo:
+        
+        # --- INÍCIO DA MODIFICAÇÃO (Verificação de Duplicidade) ---
+        novo_titulo = self.titulo_input.text().strip()
+        
+        if not novo_titulo:
             QMessageBox.warning(self, "Título Obrigatório", 
-                              "O título da lista não pode estar vazio. Ele é usado como identificador.")
+                                "O título da lista não pode estar vazio. Ele é usado como identificador.")
             return
 
+        # Compara com todas as listas no banco
+        for lista_existente in self.banco_listas:
+            # 1. Compara o título (ignorando maiúsculas/minúsculas e espaços)
+            if lista_existente.titulo.strip().lower() == novo_titulo.lower():
+                
+                # 2. Verifica se a lista encontrada é A MESMA que estamos editando.
+                if self.lista_original_para_edicao is lista_existente:
+                    continue # É o mesmo objeto, permite salvar.
+
+                # 3. Se for uma lista DIFERENTE com o mesmo nome, bloqueia.
+                QMessageBox.warning(self, "Título Duplicado", 
+                                    f"Já existe uma lista com o título '{novo_titulo}'.\n"
+                                    "O título da lista deve ser único.")
+                return # Não fecha o diálogo
+        # --- FIM DA MODIFICAÇÃO ---
+
         # Salva os dados de volta no objeto self.lista
-        self.lista.titulo = titulo
+        self.lista.titulo = novo_titulo
         self.lista.mostrar_titulo = self.mostrar_titulo_check.isChecked()
         self.lista.tipo_enumeracao = self.tipo_enumeracao_combo.currentText() # type: ignore
         
@@ -256,7 +286,7 @@ class ListaDialog(QDialog):
         
         if not self.lista.raiz.filhos:
             QMessageBox.warning(self, "Lista Vazia", 
-                              "A lista não pode estar vazia. Adicione pelo menos um item.")
+                                "A lista não pode estar vazia. Adicione pelo menos um item.")
             return
 
         super().accept()

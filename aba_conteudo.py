@@ -1,12 +1,9 @@
 # aba_conteudo.py
 # Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
-# para melhorar a usabilidade e o espaço de edição, incluindo Menu de Contexto
-# no editor para inserção rápida de ativos.
-# Correção (Bug Navegação): Adicionado sinal 'topicoSelecionadoParaNavegacao'
-# e método _get_item_numero_completo.
-# ATUALIZAÇÃO: Adicionada a aba "Listas" ao painel de bancos.
-# MODIFICAÇÃO: Adicionados botões Desfazer/Refazer na barra de ferramentas do editor.
-# CORREÇÃO (Undo/Redo): Corrigida a chamada para self.editor_capitulo.document().isUndoAvailable()
+# ...
+# ATUALIZAÇÃO (Lista): Passa o banco_listas para o ListaDialog
+# ATUALIZAÇÃO (Proativa): Passa o banco_tabelas e banco_formulas
+# para seus respectivos diálogos.
 
 import re
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -18,7 +15,7 @@ from PySide6.QtWidgets import (QWidget, QLabel, QTextEdit, QPushButton, QListWid
 from documento import Capitulo, Tabela, Figura, Formula, ListaABNT # <--- ADICIONADO ListaABNT
 from dialogo_tabela import TabelaDialog
 from dialogo_figura import DialogoFigura
-from DialogoFormula import DialogoFormula
+from dialogo_formula import DialogoFormula
 from dialogo_lista import ListaDialog # <--- NOVO IMPORT
 
 # --- CLASSE ADICIONAL PARA SOBRESCREVER O MENU DE CONTEXTO (CORRIGIDA) ---
@@ -555,7 +552,9 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot()
     def _adicionar_tabela(self):
-        dialog = TabelaDialog(parent=self)
+        # --- INÍCIO DA MODIFICAÇÃO (Passa o banco_tabelas) ---
+        dialog = TabelaDialog(banco_tabelas=self.documento.banco_tabelas, parent=self)
+        # --- FIM DA MODIFICAÇÃO ---
         if dialog.exec():
             nova_tabela = dialog.get_dados_tabela()
             self.documento.banco_tabelas.append(nova_tabela)
@@ -565,7 +564,9 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot()
     def _adicionar_figura(self):
-        dialog = DialogoFigura(parent=self)
+        # Passa o banco_figuras para o diálogo
+        dialog = DialogoFigura(banco_figuras=self.documento.banco_figuras, parent=self)
+        
         if dialog.exec():
             nova_figura = dialog.get_dados_figura()
             if nova_figura and nova_figura.caminho_processado:
@@ -576,7 +577,9 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot()
     def _adicionar_formula(self):
-        dialog = DialogoFormula(parent=self)
+        # --- INÍCIO DA MODIFICAÇÃO (Passa o banco_formulas) ---
+        dialog = DialogoFormula(banco_formulas=self.documento.banco_formulas, parent=self)
+        # --- FIM DA MODIFICAÇÃO ---
         if dialog.exec():
             nova_formula = dialog.get_dados_formula()
             self.documento.banco_formulas.append(nova_formula)
@@ -588,15 +591,12 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot()
     def _adicionar_lista(self):
-        dialog = ListaDialog(parent=self)
+        dialog = ListaDialog(banco_listas=self.documento.banco_listas, parent=self)
+        
         if dialog.exec():
             nova_lista = dialog.get_dados_lista()
             
-            if any(l.titulo.lower() == nova_lista.titulo.lower() for l in self.documento.banco_listas):
-                QMessageBox.critical(self, "Erro de Duplicidade", 
-                                     f"Já existe uma lista com o título '{nova_lista.titulo}'.\nO título deve ser único.")
-                return
-
+            # A verificação de duplicidade agora é feita DENTRO do ListaDialog
             self.documento.banco_listas.append(nova_lista)
             self.atualizar_bancos_visuais()
             self._inserir_marcador_generico("Lista", nova_lista.titulo)
@@ -610,15 +610,16 @@ class AbaConteudo(QWidget):
         lista_original = next((l for l in self.documento.banco_listas if l.titulo == titulo_lista), None)
         if not lista_original: return
         
-        dialog = ListaDialog(lista_existente=lista_original, parent=self)
+        dialog = ListaDialog(lista_existente=lista_original, 
+                             banco_listas=self.documento.banco_listas, 
+                             parent=self)
+        
         if dialog.exec():
-            lista_editada = dialog.get_dados_lista()
+            # A verificação de duplicidade agora é feita DENTRO do ListaDialog
             
-            if lista_original.titulo != lista_editada.titulo:
-                if any(l.titulo.lower() == lista_editada.titulo.lower() for l in self.documento.banco_listas if l is not lista_original):
-                    QMessageBox.critical(self, "Erro de Duplicidade", 
-                                         f"Já existe outra lista com o título '{lista_editada.titulo}'.\nO título deve ser único.")
-                    return 
+            # Atualiza o objeto original com quaisquer dados novos
+            lista_editada = dialog.get_dados_lista()
+            lista_original.__dict__.update(lista_editada.__dict__)
             
             self.atualizar_bancos_visuais()
 
@@ -633,7 +634,7 @@ class AbaConteudo(QWidget):
             self.atualizar_bancos_visuais()
             
     # --- FIM: NOVOS SLOTS PARA LISTAS ---
-                
+            
     def _get_capitulo_selecionado(self) -> Capitulo | None:
         item = self.arvore_capitulos.currentItem()
         return item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
@@ -653,7 +654,12 @@ class AbaConteudo(QWidget):
         tabela_original = next((t for t in self.documento.banco_tabelas if t.titulo == titulo_tabela), None)
         if not tabela_original: return
         
-        dialog = TabelaDialog(tabela=tabela_original, parent=self)
+        # --- INÍCIO DA MODIFICAÇÃO (Passa o banco_tabelas) ---
+        dialog = TabelaDialog(tabela=tabela_original, 
+                              banco_tabelas=self.documento.banco_tabelas, 
+                              parent=self)
+        # --- FIM DA MODIFICAÇÃO ---
+        
         if dialog.exec():
             tabela_original.__dict__.update(dialog.get_dados_tabela().__dict__)
             self.atualizar_bancos_visuais()
@@ -676,9 +682,15 @@ class AbaConteudo(QWidget):
         figura_original = next((f for f in self.documento.banco_figuras if f.titulo == titulo_figura), None)
         if not figura_original: return
         
-        dialog = DialogoFigura(figura=figura_original, parent=self)
+        # Passa o banco_figuras para o diálogo
+        dialog = DialogoFigura(figura=figura_original, 
+                             banco_figuras=self.documento.banco_figuras, 
+                             parent=self)
+        
         if dialog.exec():
-            figura_original.__dict__.update(dialog.get_dados_figura().__dict__)
+            # Atualiza o objeto original com quaisquer dados novos
+            dados_novos = dialog.get_dados_figura()
+            figura_original.__dict__.update(dados_novos.__dict__)
             self.atualizar_bancos_visuais()
     
     @QtCore.Slot()
@@ -698,7 +710,12 @@ class AbaConteudo(QWidget):
         formula_original = next((f for f in self.documento.banco_formulas if f.legenda == legenda_formula), None)
         if not formula_original: return
         
-        dialog = DialogoFormula(formula=formula_original, parent=self)
+        # --- INÍCIO DA MODIFICAÇÃO (Passa o banco_formulas) ---
+        dialog = DialogoFormula(formula=formula_original, 
+                                banco_formulas=self.documento.banco_formulas, 
+                                parent=self)
+        # --- FIM DA MODIFICAÇÃO ---
+        
         if dialog.exec():
             formula_original.__dict__.update(dialog.get_dados_formula().__dict__)
             self.atualizar_bancos_visuais()

@@ -1,6 +1,8 @@
 # dialogo_tabela.py
 # Descrição: Janela de diálogo para a criação e edição detalhada de tabelas.
 # Versão atualizada com opção de centralização de conteúdo.
+# ATUALIZAÇÃO: Adicionada verificação de título duplicado
+# no método accept() para evitar bugs de referência.
 
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QLineEdit, QComboBox,
@@ -11,12 +13,20 @@ from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QLineEdit, QComboBox,
 from documento import Tabela
 
 class TabelaDialog(QDialog):
-    def __init__(self, tabela: Tabela = None, parent: QWidget = None):
+    
+    # --- INÍCIO DA MODIFICAÇÃO (Adiciona banco_tabelas) ---
+    def __init__(self, tabela: Tabela = None, banco_tabelas: list[Tabela] = None, parent: QWidget = None):
+    # --- FIM DA MODIFICAÇÃO ---
+        
         super().__init__(parent)
         self.setWindowTitle("Editor de Tabela ABNT")
         self.setMinimumSize(600, 400)
 
+        # --- INÍCIO DA MODIFICAÇÃO (Armazena dependências) ---
+        self.tabela_original_para_edicao = tabela
         self.tabela = tabela if tabela else Tabela(dados=[["Cabeçalho 1", "Cabeçalho 2"], ["Dado 1", "Dado 2"]])
+        self.banco_tabelas = banco_tabelas if banco_tabelas else []
+        # --- FIM DA MODIFICAÇÃO ---
 
         self.layout = QVBoxLayout(self)
 
@@ -84,10 +94,30 @@ class TabelaDialog(QDialog):
         """
         Executa a validação ANTES de fechar a janela.
         """
-        if not self.titulo_input.text().strip():
+        
+        # --- INÍCIO DA MODIFICAÇÃO (Verificação de Duplicidade) ---
+        novo_titulo = self.titulo_input.text().strip()
+
+        if not novo_titulo:
             QMessageBox.warning(self, "Título Obrigatório", 
-                                "O título da tabela não pode estar vazio. Por favor, preencha o campo para salvar.")
-            return
+                                  "O título da tabela não pode estar vazio. Por favor, preencha o campo para salvar.")
+            return # Não fecha o diálogo
+
+        # Compara com todas as tabelas no banco
+        for tabela_existente in self.banco_tabelas:
+            # 1. Compara o título
+            if tabela_existente.titulo.strip().lower() == novo_titulo.lower():
+                
+                # 2. Verifica se é a MESMA tabela que estamos editando
+                if self.tabela_original_para_edicao is tabela_existente:
+                    continue # É o mesmo objeto, permite salvar.
+
+                # 3. Se for uma tabela DIFERENTE com o mesmo nome, bloqueia.
+                QMessageBox.warning(self, "Título Duplicado", 
+                                    f"Já existe uma tabela com o título '{novo_titulo}'.\n"
+                                    "O título da tabela deve ser único.")
+                return # Não fecha o diálogo
+        # --- FIM DA MODIFICAÇÃO ---
         
         super().accept()
 
@@ -113,7 +143,8 @@ class TabelaDialog(QDialog):
         if col != -1: self.table_widget.removeColumn(col)
             
     def get_dados_tabela(self) -> Tabela:
-        self.tabela.titulo = self.titulo_input.text()
+        # Atualiza o título com o texto já tratado
+        self.tabela.titulo = self.titulo_input.text().strip()
         self.tabela.fonte = self.fonte_input.text()
         self.tabela.estilo_borda = 'abnt' if self.estilo_borda_combo.currentIndex() == 0 else 'grade'
         
