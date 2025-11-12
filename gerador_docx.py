@@ -1,7 +1,7 @@
 # gerador_docx.py
 # Descrição: Versão com a correção do recuo (TAB) na primeira
 # linha do Resumo.
-# ATUALIZAÇÃO: Adicionada lógica para renderizar {{Lista:Titulo}}.
+# ATUALIZAÇÃO (Gráfico): Adicionada lógica para renderizar {{Grafico:Titulo}}.
 
 import os
 import re
@@ -20,7 +20,10 @@ except ImportError:
     WIN32_AVAILABLE = False
     print("AVISO: Biblioteca 'pywin32' não encontrada. A automação do sumário será desativada.")
 
-from documento import DocumentoABNT, Capitulo, ItemLista, ListaABNT # <--- ADICIONADO ItemLista, ListaABNT
+# --- INÍCIO DA MODIFICAÇÃO ---
+from documento import (DocumentoABNT, Capitulo, ItemLista, ListaABNT, 
+                       Grafico) # <--- ADICIONADO Grafico
+# --- FIM DA MODIFICAÇÃO ---
 from normas_abnt import MotorNormasABNT
 
 def adicionar_sumario(doc, paragrafo_placeholder):
@@ -57,7 +60,8 @@ class GeradorDOCX:
         self.contador_tabelas = 0
         self.contador_figuras = 0
         self.contador_formulas = 0
-        self.contador_listas = 0 # <--- NOVO CONTADOR
+        self.contador_listas = 0 
+        self.contador_graficos = 0 # <--- NOVO CONTADOR
 
     def _atualizar_sumario_com_word(self, caminho_arquivo):
         if not WIN32_AVAILABLE:
@@ -164,7 +168,8 @@ class GeradorDOCX:
             self.regras.aplicar_estilo_titulo_secao(self.doc, numero_completo, no_filho.titulo, nivel=nivel_titulo)
 
             if no_filho.conteudo:
-                padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}" # <--- REGEX ATUALIZADO
+                # --- REGEX ATUALIZADO ---
+                padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista|Grafico):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
                 partes = re.split(padrao, no_filho.conteudo)
 
                 idx = 0
@@ -177,7 +182,9 @@ class GeradorDOCX:
                                 p = self.doc.add_paragraph()
                                 self.regras.aplicar_estilo_paragrafo_normal(p, texto_paragrafo)
                     
-                    if idx + 3 < len(partes):
+                    # (Regex Atualizado tem 3 grupos de captura, 
+                    # então (idx+3) ainda é o índice do comando)
+                    if idx + 3 < len(partes): 
                         tipo_obj = partes[idx+1]
                         titulo_obj = partes[idx+2]
                         comando = partes[idx+3]
@@ -195,6 +202,18 @@ class GeradorDOCX:
                                     self.contador_figuras += 1
                                     obj.numero = self.contador_figuras
                                     self._renderizar_figura(obj)
+                            
+                            # --- INÍCIO: LÓGICA DE RENDERIZAÇÃO DO GRÁFICO ---
+                            # (Gráficos são numerados como figuras, mas usam o 'contador_graficos'
+                            # e o banco_graficos para encontrar o objeto correto)
+                            elif tipo_obj == "Grafico":
+                                obj = next((g for g in self.doc_abnt.banco_graficos if g.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_graficos += 1
+                                    obj.numero = self.contador_graficos
+                                    self._renderizar_grafico(obj) # Chama o novo método
+                            # --- FIM: LÓGICA DE RENDERIZAÇÃO DO GRÁFICO ---
+
                             elif tipo_obj == "Formula":
                                 obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo_obj), None)
                                 if obj:
@@ -202,14 +221,12 @@ class GeradorDOCX:
                                     obj.numero = self.contador_formulas
                                     self._renderizar_formula(obj)
                             
-                            # --- INÍCIO: LÓGICA DE RENDERIZAÇÃO DA LISTA ---
                             elif tipo_obj == "Lista":
                                 obj = next((l for l in self.doc_abnt.banco_listas if l.titulo == titulo_obj), None)
                                 if obj:
                                     self.contador_listas += 1
                                     obj.numero = self.contador_listas
                                     self._renderizar_lista(obj)
-                            # --- FIM: LÓGICA DE RENDERIZAÇÃO DA LISTA ---
                         
                         elif comando:
                             if comando == "QUEBRA_PAGINA":
@@ -222,7 +239,9 @@ class GeradorDOCX:
                                 p.paragraph_format.space_after = Pt(0)
                                 self.doc.add_page_break()
                                 
-                    idx += 4
+                        idx += 4 # Avança (Texto, Tipo, Titulo, Comando)
+                    else:
+                        idx += 1 # Avança o último bloco de texto
             
             self._renderizar_secoes_recursivamente(no_filho, prefixo_numeracao=f"{numero_completo}.")
 
@@ -294,6 +313,41 @@ class GeradorDOCX:
         else:
             p_imagem.paragraph_format.keep_with_next = False
 
+    # --- INÍCIO: NOVO MÉTODO PARA RENDERIZAR GRÁFICO ---
+    def _renderizar_grafico(self, grafico_obj):
+        """Renderiza um gráfico (imagem) no DOCX, formatado como uma Figura."""
+        
+        # 1. Título (Legenda Superior)
+        p_titulo = self.doc.add_paragraph()
+        # ABNT trata Gráfico como Figura, mas usamos a palavra "Gráfico"
+        p_titulo.add_run(f"Gráfico {grafico_obj.numero} – {grafico_obj.titulo}")
+        self.regras.aplicar_estilo_legenda(p_titulo, is_titulo=True)
+        p_titulo.paragraph_format.keep_with_next = True
+
+        # 2. Imagem (Centralizada)
+        p_imagem = self.doc.add_paragraph()
+        p_imagem.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        try:
+            p_imagem.add_run().add_picture(grafico_obj.caminho_imagem_processada, width=Cm(grafico_obj.largura_cm))
+        except Exception as e:
+            run_erro = p_imagem.add_run(f"[ERRO: Imagem do Gráfico '{grafico_obj.caminho_imagem_processada}' não encontrada. {e}]")
+            run_erro.italic = True
+            run_erro.font.color.rgb = self.regras.COR_FONTE_PADRAO
+
+        p_imagem.paragraph_format.space_before = Pt(0)
+        p_imagem.paragraph_format.space_after = Pt(0)
+        p_imagem.paragraph_format.keep_with_next = True
+
+        # 3. Fonte (Legenda Inferior)
+        if grafico_obj.fonte:
+            p_fonte = self.doc.add_paragraph()
+            p_fonte.add_run(f"Fonte: {grafico_obj.fonte}")
+            self.regras.aplicar_estilo_legenda(p_fonte, is_titulo=False)
+        else:
+            # Se não houver fonte, permite quebra de página após a imagem
+            p_imagem.paragraph_format.keep_with_next = False
+    # --- FIM: NOVO MÉTODO ---
+
     def _renderizar_formula(self, formula_obj):
         p_formula = self.doc.add_paragraph()
 
@@ -327,7 +381,7 @@ class GeradorDOCX:
         p_legenda.paragraph_format.space_before = Pt(6)
         p_legenda.paragraph_format.space_after = Pt(12)
 
-    # --- INÍCIO: NOVOS MÉTODOS PARA RENDERIZAR LISTA DOCX ---
+    # --- INÍCIO: MÉTODOS PARA RENDERIZAR LISTA DOCX ---
 
     def _get_marcador_lista(self, tipo: str, nivel: int, indice: int, prefixo_num: str) -> tuple[str, str]:
         """
@@ -335,9 +389,9 @@ class GeradorDOCX:
         """
         if tipo == "Híbrida (ABNT)":
             if nivel == 1: return f"{self._get_char_alfabetico(indice)})", "" # a)
-            if nivel == 2: return f"{indice + 1})", ""                      # 1)
+            if nivel == 2: return f"{indice + 1})", ""                       # 1)
             if nivel == 3: return f"{self._get_char_romano(indice)}", ""     # i)
-            return "-", ""                                                  # -
+            return "-", ""                                                   # -
         
         if tipo == "Numérica (Seção)":
             num_atual = f"{prefixo_num}{indice + 1}."
@@ -421,7 +475,7 @@ class GeradorDOCX:
         # Inicia a recursão (começa no nível 1)
         render_itens_recursivo(lista_obj.raiz, 1, "")
         
-    # --- FIM: NOVO MÉTODO ---
+    # --- FIM: MÉTODOS DE LISTA ---
 
     def _set_page_numbering(self, section):
         section.header.is_linked_to_previous = False

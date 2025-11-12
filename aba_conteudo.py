@@ -1,9 +1,14 @@
 # aba_conteudo.py
 # Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
-# ...
-# ATUALIZAÇÃO (Lista): Passa o banco_listas para o ListaDialog
-# ATUALIZAÇÃO (Proativa): Passa o banco_tabelas e banco_formulas
-# para seus respectivos diálogos.
+#
+# ATUALIZAÇÃO (v45):
+# 1. Syntax Highlighting: Adicionada a classe 'MarcadorHighlighter'
+#    para colorir os marcadores ({{Figura:..}}, {{Grafico:..}}, etc.)
+#    dentro do editor de texto principal.
+# 2. Abas Compactas: Aplicado um stylesheet local ao QTabWidget
+#    dos "Bancos de Ativos" para reduzir o tamanho das abas
+#    e eliminar a barra de rolagem horizontal das abas.
+#
 
 import re
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -11,12 +16,85 @@ from PySide6.QtWidgets import (QWidget, QLabel, QTextEdit, QPushButton, QListWid
                                QVBoxLayout, QHBoxLayout, QMessageBox, QTreeWidget,
                                QTreeWidgetItem, QInputDialog, QAbstractItemView, QLineEdit, QTabWidget,
                                QSplitter, QToolButton)
+# --- INÍCIO DAS MODIFICAÇÕES (v45) ---
+from PySide6.QtGui import (QSyntaxHighlighter, QTextCharFormat, QColor, 
+                           QFont)
+# --- FIM DAS MODIFICAÇÕES (v45) ---
 
-from documento import Capitulo, Tabela, Figura, Formula, ListaABNT # <--- ADICIONADO ListaABNT
+from documento import (Capitulo, Tabela, Figura, Formula, ListaABNT, 
+                       Grafico)
 from dialogo_tabela import TabelaDialog
 from dialogo_figura import DialogoFigura
 from dialogo_formula import DialogoFormula
-from dialogo_lista import ListaDialog # <--- NOVO IMPORT
+from dialogo_lista import ListaDialog
+from dialogo_chart import ChartDialog 
+import os
+
+# --- INÍCIO DAS MODIFICAÇÕES (v45) ---
+# 1. CLASSE SYNTAX HIGHLIGHTER PARA MARCADORES
+# ---------------------------------------------------------------
+
+class MarcadorHighlighter(QSyntaxHighlighter):
+    """
+    Realça a sintaxe dos marcadores {{...}} dentro do QTextEdit.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.highlight_rules = []
+        
+        # Regex para todos os marcadores.
+        # Grupo 1: Marcadores de Ativo (ex: {{Figura:Nome}})
+        #   Grupo 2: O tipo (Figura)
+        #   Grupo 3: O nome (Nome)
+        # Grupo 4: Marcadores de Comando (ex: {{QUEBRA_PAGINA}})
+        #   Grupo 5: O comando (QUEBRA_PAGINA)
+        self.marker_regex = re.compile(
+            r"(\{\{(Tabela|Figura|Grafico|Formula|Lista):([^}]+)\}\})|"
+            r"(\{\{(QUEBRA_PAGINA|PAGINA_EM_BRANCO)\}\})"
+        )
+
+        # Formatos de cor
+        self.formats = {}
+        
+        # Cores base (podem ser personalizadas)
+        base_colors = {
+            "Tabela": "#0078d4",  # Azul
+            "Figura": "#008a00",  # Verde
+            "Grafico": "#8a008a", # Roxo
+            "Formula": "#d13438", # Vermelho
+            "Lista": "#b45f06",   # Laranja
+            "QUEBRA_PAGINA": "#a0a0a0", # Cinza
+            "PAGINA_EM_BRANCO": "#a0a0a0", # Cinza
+        }
+
+        for tipo, cor_hex in base_colors.items():
+            format = QTextCharFormat()
+            format.setForeground(QColor(cor_hex))
+            format.setFontWeight(QFont.Weight.Bold)
+            # Adiciona um fundo sutil para destacar o marcador
+            format.setBackground(QColor("#f0f0f0")) 
+            self.formats[tipo] = format
+
+    def highlightBlock(self, text):
+        """Aplica a formatação ao bloco de texto atual."""
+        # Loop sobre todas as correspondências no bloco de texto
+        for match in self.marker_regex.finditer(text):
+            
+            if match.group(1): # É um marcador de ativo (ex: {{Figura:Nome}})
+                tipo = match.group(2) # O tipo (Figura)
+                if tipo in self.formats:
+                    # Aplica o formato ao grupo 1 (o marcador inteiro)
+                    self.setFormat(match.start(1), match.end(1) - match.start(1), self.formats[tipo])
+            
+            elif match.group(4): # É um marcador de comando (ex: {{QUEBRA_PAGINA}})
+                tipo = match.group(5) # O tipo (QUEBRA_PAGINA)
+                if tipo in self.formats:
+                    # Aplica o formato ao grupo 4 (o marcador inteiro)
+                    self.setFormat(match.start(4), match.end(4) - match.start(4), self.formats[tipo])
+
+# ---------------------------------------------------------------
+# --- FIM DAS MODIFICAÇÕES (v45) ---
+
 
 # --- CLASSE ADICIONAL PARA SOBRESCREVER O MENU DE CONTEXTO (CORRIGIDA) ---
 class EditorConteudo(QTextEdit):
@@ -29,14 +107,8 @@ class EditorConteudo(QTextEdit):
         self.aba_conteudo_parent = aba_conteudo_parent # Referência ao AbaConteudo
     
     def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
-        # 1. Cria o menu padrão do QTextEdit (contém Copiar, Colar, Selecionar Tudo, etc.)
         menu = self.createStandardContextMenu()
-        
-        # 2. Chama o método no AbaConteudo para adicionar as ações customizadas
-        # (Passamos o menu nativo para que ele seja modificado)
         self.aba_conteudo_parent._adicionar_acoes_menu_contexto(menu)
-        
-        # 3. Executa o menu combinado na posição do clique
         menu.exec(event.globalPos())
 
 # --- CLASSE ARVORE CONTEUDO ---
@@ -57,8 +129,6 @@ class ArvoreConteudo(QTreeWidget):
 
 # --- CLASSE ABA CONTEUDO ---
 class AbaConteudo(QWidget):
-    # SINAL: Emitido quando um tópico é selecionado,
-    # enviando o ID da âncora HTML (ex: "secao-1-1")
     topicoSelecionadoParaNavegacao = QtCore.Signal(str)
 
     def __init__(self, documento, parent=None):
@@ -150,8 +220,21 @@ class AbaConteudo(QWidget):
         self.lista_figuras = QListWidget()
         self.lista_formulas = QListWidget()
         self.lista_listas = QListWidget() 
+        self.lista_graficos = QListWidget() 
 
         self.bancos_tabs = QTabWidget()
+        
+        # --- INÍCIO DAS MODIFICAÇÕES (v45) ---
+        # 2. ESTILO DE ABAS COMPACTAS
+        self.bancos_tabs.setObjectName("BancosAbas")
+        self.bancos_tabs.setStyleSheet("""
+            QTabWidget#BancosAbas QTabBar::tab {
+                font-size: 12px;
+                padding: 6px 8px;
+            }
+        """)
+        # --- FIM DAS MODIFICAÇÕES (v45) ---
+
 
         # Cria o widget para a aba "Tabelas"
         tabelas_widget = QWidget()
@@ -209,6 +292,37 @@ class AbaConteudo(QWidget):
         btn_del_figura.clicked.connect(self._remover_figura)
         btn_ins_figura.clicked.connect(lambda: self._inserir_marcador_generico("Figura", self.lista_figuras.currentItem().text()) if self.lista_figuras.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma figura do banco para inserir."))
 
+        # Cria o widget para a aba "Gráficos"
+        graficos_widget = QWidget()
+        graficos_v_layout = QVBoxLayout(graficos_widget)
+        graficos_v_layout.addWidget(QLabel("Banco de Gráficos do Projeto:"))
+        
+        self.filtro_graficos_check = QCheckBox("Mostrar apenas do tópico atual")
+        self.filtro_graficos_check.stateChanged.connect(self.atualizar_bancos_visuais)
+        graficos_v_layout.addWidget(self.filtro_graficos_check)
+        graficos_v_layout.addWidget(self.lista_graficos)
+        
+        graficos_btn_layout = QHBoxLayout()
+        btn_add_grafico = QPushButton("Criar")
+        btn_edit_grafico = QPushButton("Editar")
+        btn_del_grafico = QPushButton("Remover")
+
+        btn_edit_grafico.setProperty("cssClass", "utility")
+        btn_del_grafico.setProperty("cssClass", "destructive")
+        
+        graficos_btn_layout.addWidget(btn_add_grafico)
+        graficos_btn_layout.addWidget(btn_edit_grafico)
+        graficos_btn_layout.addWidget(btn_del_grafico)
+        graficos_v_layout.addLayout(graficos_btn_layout)
+        
+        btn_ins_grafico = QPushButton("Inserir no Texto")
+        graficos_v_layout.addWidget(btn_ins_grafico)
+        
+        btn_add_grafico.clicked.connect(self._adicionar_grafico)
+        btn_edit_grafico.clicked.connect(self._editar_grafico)
+        btn_del_grafico.clicked.connect(self._remover_grafico)
+        btn_ins_grafico.clicked.connect(lambda: self._inserir_marcador_generico("Grafico", self.lista_graficos.currentItem().text()) if self.lista_graficos.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione um gráfico do banco para inserir."))
+
         # Cria o widget para a aba "Fórmulas"
         formulas_widget = QWidget()
         formulas_v_layout = QVBoxLayout(formulas_widget)
@@ -237,7 +351,7 @@ class AbaConteudo(QWidget):
         btn_del_formula.clicked.connect(self._remover_formula)
         btn_ins_formula.clicked.connect(lambda: self._inserir_marcador_generico("Formula", self.lista_formulas.currentItem().text()) if self.lista_formulas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma fórmula do banco para inserir."))
         
-        # --- INÍCIO: Cria o widget para a aba "Listas" ---
+        # Cria o widget para a aba "Listas"
         listas_widget = QWidget()
         listas_v_layout = QVBoxLayout(listas_widget)
         listas_v_layout.addWidget(QLabel("Banco de Listas do Projeto:"))
@@ -263,16 +377,15 @@ class AbaConteudo(QWidget):
         btn_ins_lista = QPushButton("Inserir no Texto")
         listas_v_layout.addWidget(btn_ins_lista)
         
-        # Conecta os slots
         btn_add_lista.clicked.connect(self._adicionar_lista)
         btn_edit_lista.clicked.connect(self._editar_lista)
         btn_del_lista.clicked.connect(self._remover_lista)
         btn_ins_lista.clicked.connect(lambda: self._inserir_marcador_generico("Lista", self.lista_listas.currentItem().text()) if self.lista_listas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma lista do banco para inserir."))
-        # --- FIM: widget da aba "Listas" ---
         
         # Adiciona os widgets criados como abas no QTabWidget
         self.bancos_tabs.addTab(tabelas_widget, "Tabelas")
         self.bancos_tabs.addTab(figuras_widget, "Figuras")
+        self.bancos_tabs.addTab(graficos_widget, "Gráficos") 
         self.bancos_tabs.addTab(formulas_widget, "Fórmulas")
         self.bancos_tabs.addTab(listas_widget, "Listas") 
 
@@ -290,21 +403,18 @@ class AbaConteudo(QWidget):
         format_toolbar = QHBoxLayout()
         format_toolbar.addWidget(QLabel("Formatação:"))
         
-        # 1. Criar botão Desfazer (Undo)
         self.btn_desfazer = QToolButton()
         self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo.png"))
         self.btn_desfazer.setToolTip("Desfazer (Ctrl+Z)")
-        self.btn_desfazer.setEnabled(False) # Começa desabilitado
+        self.btn_desfazer.setEnabled(False)
         format_toolbar.addWidget(self.btn_desfazer)
 
-        # 2. Criar botão Refazer (Redo)
         self.btn_refazer = QToolButton()
         self.btn_refazer.setIcon(QtGui.QIcon("assets/icons/redo.png"))
         self.btn_refazer.setToolTip("Refazer (Ctrl+Y)")
-        self.btn_refazer.setEnabled(False) # Começa desabilitado
+        self.btn_refazer.setEnabled(False)
         format_toolbar.addWidget(self.btn_refazer)
         
-        # BOTÕES DE ÍCONE (QToolButton)
         self.btn_quebra_pagina = QToolButton()
         self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break.png")) 
         self.btn_quebra_pagina.setToolTip("Inserir Quebra de Página (Ctrl+Enter)")
@@ -322,11 +432,14 @@ class AbaConteudo(QWidget):
         self.editor_capitulo = EditorConteudo(aba_conteudo_parent=self) 
         self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
 
-        # 3. Conectar os cliques aos slots do editor
+        # --- INÍCIO DAS MODIFICAÇÕES (v45) ---
+        # 3. APLICAR O SYNTAX HIGHLIGHTER
+        self.highlighter = MarcadorHighlighter(self.editor_capitulo.document())
+        # --- FIM DAS MODIFICAÇÕES (v45) ---
+
         self.btn_desfazer.clicked.connect(self.editor_capitulo.undo)
         self.btn_refazer.clicked.connect(self.editor_capitulo.redo)
         
-        # 4. Conectar a disponibilidade (para habilitar/desabilitar botões)
         self.editor_capitulo.undoAvailable.connect(self.btn_desfazer.setEnabled)
         self.editor_capitulo.redoAvailable.connect(self.btn_refazer.setEnabled)
         
@@ -340,7 +453,7 @@ class AbaConteudo(QWidget):
         if self.arvore_capitulos.topLevelItemCount() > 0:
             self.arvore_capitulos.setCurrentItem(self.arvore_capitulos.topLevelItem(0))
 
-    # --- NOVOS MÉTODOS DE MENU DE CONTEXTO (MODIFICADOS) ---
+    # --- MÉTODOS DE MENU DE CONTEXTO (MODIFICADOS) ---
 
     @QtCore.Slot(QtWidgets.QMenu)
     def _adicionar_acoes_menu_contexto(self, menu: QtWidgets.QMenu): # Aceita o menu nativo
@@ -362,6 +475,15 @@ class AbaConteudo(QWidget):
             tipo="Figura",
             inserir_slot=self._inserir_marcador_generico,
             criar_slot=self._adicionar_figura
+        )
+
+        menu_graficos = menu.addMenu("Inserir Gráfico")
+        self._adicionar_submenus_banco(
+            menu=menu_graficos, 
+            banco=self.documento.banco_graficos,
+            tipo="Grafico",
+            inserir_slot=self._inserir_marcador_generico,
+            criar_slot=self._adicionar_grafico
         )
 
         menu_formulas = menu.addMenu("Inserir Fórmula")
@@ -423,6 +545,14 @@ class AbaConteudo(QWidget):
         else:
             for figura in self.documento.banco_figuras: self.lista_figuras.addItem(figura.titulo)
             
+        self.lista_graficos.clear()
+        if self.filtro_graficos_check.isChecked() and capitulo_selecionado:
+            titulos_usados = set(re.findall(r"\{\{Grafico:([^}]+)\}\}", conteudo_capitulo))
+            for grafico in self.documento.banco_graficos:
+                if grafico.titulo in titulos_usados: self.lista_graficos.addItem(grafico.titulo)
+        else:
+            for grafico in self.documento.banco_graficos: self.lista_graficos.addItem(grafico.titulo)
+
         self.lista_formulas.clear()
         if self.filtro_formulas_check.isChecked() and capitulo_selecionado:
             legendas_usadas = set(re.findall(r"\{\{Formula:([^}]+)\}\}", conteudo_capitulo))
@@ -452,6 +582,7 @@ class AbaConteudo(QWidget):
     @QtCore.Slot()
     def _on_editor_text_changed(self):
         self._salvar_conteudo_capitulo()
+        # Atualiza os filtros caso um novo marcador tenha sido digitado
         self.atualizar_bancos_visuais()
 
     def _get_item_numero_completo(self, item: QTreeWidgetItem) -> str:
@@ -479,7 +610,7 @@ class AbaConteudo(QWidget):
     @QtCore.Slot(QTreeWidgetItem, QTreeWidgetItem)
     def _on_capitulo_selecionado_changed(self, item_atual, item_anterior):
         self._carregar_capitulo_no_editor(item_atual, item_anterior)
-        self.atualizar_bancos_visuais()
+        self.atualizar_bancos_visuais() # Atualiza os filtros para o novo capítulo
 
         if item_atual:
             try:
@@ -530,13 +661,10 @@ class AbaConteudo(QWidget):
         self.btn_quebra_pagina.setEnabled(elementos_habilitados)
         self.btn_pagina_em_branco.setEnabled(elementos_habilitados)
         
-        # --- INÍCIO DA CORREÇÃO ---
-        # A função é .document().isUndoAvailable(), não .isUndoAvailable()
         if hasattr(self, 'btn_desfazer'):
             self.btn_desfazer.setEnabled(elementos_habilitados and self.editor_capitulo.document().isUndoAvailable())
         if hasattr(self, 'btn_refazer'):
             self.btn_refazer.setEnabled(elementos_habilitados and self.editor_capitulo.document().isRedoAvailable())
-        # --- FIM DA CORREÇÃO ---
         
         if not capitulo:
             self.editor_capitulo.clear()
@@ -552,9 +680,7 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot()
     def _adicionar_tabela(self):
-        # --- INÍCIO DA MODIFICAÇÃO (Passa o banco_tabelas) ---
         dialog = TabelaDialog(banco_tabelas=self.documento.banco_tabelas, parent=self)
-        # --- FIM DA MODIFICAÇÃO ---
         if dialog.exec():
             nova_tabela = dialog.get_dados_tabela()
             self.documento.banco_tabelas.append(nova_tabela)
@@ -564,7 +690,6 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot()
     def _adicionar_figura(self):
-        # Passa o banco_figuras para o diálogo
         dialog = DialogoFigura(banco_figuras=self.documento.banco_figuras, parent=self)
         
         if dialog.exec():
@@ -577,9 +702,7 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot()
     def _adicionar_formula(self):
-        # --- INÍCIO DA MODIFICAÇÃO (Passa o banco_formulas) ---
         dialog = DialogoFormula(banco_formulas=self.documento.banco_formulas, parent=self)
-        # --- FIM DA MODIFICAÇÃO ---
         if dialog.exec():
             nova_formula = dialog.get_dados_formula()
             self.documento.banco_formulas.append(nova_formula)
@@ -587,7 +710,7 @@ class AbaConteudo(QWidget):
             if nova_formula.legenda:
                 self._inserir_marcador_generico("Formula", nova_formula.legenda)
 
-    # --- INÍCIO: NOVOS SLOTS PARA LISTAS ---
+    # --- SLOTS PARA LISTAS ---
 
     @QtCore.Slot()
     def _adicionar_lista(self):
@@ -595,8 +718,6 @@ class AbaConteudo(QWidget):
         
         if dialog.exec():
             nova_lista = dialog.get_dados_lista()
-            
-            # A verificação de duplicidade agora é feita DENTRO do ListaDialog
             self.documento.banco_listas.append(nova_lista)
             self.atualizar_bancos_visuais()
             self._inserir_marcador_generico("Lista", nova_lista.titulo)
@@ -615,12 +736,8 @@ class AbaConteudo(QWidget):
                              parent=self)
         
         if dialog.exec():
-            # A verificação de duplicidade agora é feita DENTRO do ListaDialog
-            
-            # Atualiza o objeto original com quaisquer dados novos
             lista_editada = dialog.get_dados_lista()
             lista_original.__dict__.update(lista_editada.__dict__)
-            
             self.atualizar_bancos_visuais()
 
     @QtCore.Slot()
@@ -633,8 +750,60 @@ class AbaConteudo(QWidget):
             self.documento.banco_listas = [l for l in self.documento.banco_listas if l.titulo != titulo_lista]
             self.atualizar_bancos_visuais()
             
-    # --- FIM: NOVOS SLOTS PARA LISTAS ---
+    # --- SLOTS PARA GRAFICOS ---
+
+    @QtCore.Slot()
+    def _adicionar_grafico(self):
+        dialog = ChartDialog(banco_graficos=self.documento.banco_graficos, parent=self)
+        
+        if dialog.exec():
+            novo_grafico = dialog.get_dados_grafico()
+            self.documento.banco_graficos.append(novo_grafico)
+            self.atualizar_bancos_visuais()
+            self._inserir_marcador_generico("Grafico", novo_grafico.titulo)
+
+    @QtCore.Slot()
+    def _editar_grafico(self):
+        linha = self.lista_graficos.currentRow()
+        if linha == -1: return
+        
+        titulo_grafico = self.lista_graficos.item(linha).text()
+        grafico_original = next((g for g in self.documento.banco_graficos if g.titulo == titulo_grafico), None)
+        if not grafico_original: return
+        
+        dialog = ChartDialog(grafico=grafico_original, 
+                             banco_graficos=self.documento.banco_graficos, 
+                             parent=self)
+        
+        if dialog.exec():
+            dados_novos = dialog.get_dados_grafico()
+            grafico_original.__dict__.update(dados_novos.__dict__)
+            self.atualizar_bancos_visuais()
+
+    @QtCore.Slot()
+    def _remover_grafico(self):
+        linha = self.lista_graficos.currentRow()
+        if linha == -1: return
+        
+        titulo_grafico = self.lista_graficos.item(linha).text()
+        if QMessageBox.question(self, "Confirmar", f"Remover o gráfico '{titulo_grafico}' do projeto?") == QMessageBox.StandardButton.Yes:
             
+            grafico_para_remover = next((g for g in self.documento.banco_graficos if g.titulo == titulo_grafico), None)
+            
+            self.documento.banco_graficos = [g for g in self.documento.banco_graficos if g.titulo != titulo_grafico]
+            self.atualizar_bancos_visuais()
+            
+            if grafico_para_remover:
+                try:
+                    if os.path.exists(grafico_para_remover.caminho_imagem_processada):
+                        os.remove(grafico_para_remover.caminho_imagem_processada)
+                    if os.path.exists(grafico_para_remover.caminho_dados_json):
+                        os.remove(grafico_para_remover.caminho_dados_json)
+                except OSError as e:
+                    QMessageBox.warning(self, "Aviso", f"Não foi possível remover os arquivos de cache do gráfico:\n{e}")
+
+    # --- FIM: SLOTS PARA GRAFICOS ---
+
     def _get_capitulo_selecionado(self) -> Capitulo | None:
         item = self.arvore_capitulos.currentItem()
         return item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
@@ -654,11 +823,9 @@ class AbaConteudo(QWidget):
         tabela_original = next((t for t in self.documento.banco_tabelas if t.titulo == titulo_tabela), None)
         if not tabela_original: return
         
-        # --- INÍCIO DA MODIFICAÇÃO (Passa o banco_tabelas) ---
         dialog = TabelaDialog(tabela=tabela_original, 
                               banco_tabelas=self.documento.banco_tabelas, 
                               parent=self)
-        # --- FIM DA MODIFICAÇÃO ---
         
         if dialog.exec():
             tabela_original.__dict__.update(dialog.get_dados_tabela().__dict__)
@@ -682,13 +849,11 @@ class AbaConteudo(QWidget):
         figura_original = next((f for f in self.documento.banco_figuras if f.titulo == titulo_figura), None)
         if not figura_original: return
         
-        # Passa o banco_figuras para o diálogo
         dialog = DialogoFigura(figura=figura_original, 
                              banco_figuras=self.documento.banco_figuras, 
                              parent=self)
         
         if dialog.exec():
-            # Atualiza o objeto original com quaisquer dados novos
             dados_novos = dialog.get_dados_figura()
             figura_original.__dict__.update(dados_novos.__dict__)
             self.atualizar_bancos_visuais()
@@ -710,11 +875,9 @@ class AbaConteudo(QWidget):
         formula_original = next((f for f in self.documento.banco_formulas if f.legenda == legenda_formula), None)
         if not formula_original: return
         
-        # --- INÍCIO DA MODIFICAÇÃO (Passa o banco_formulas) ---
         dialog = DialogoFormula(formula=formula_original, 
                                 banco_formulas=self.documento.banco_formulas, 
                                 parent=self)
-        # --- FIM DA MODIFICAÇÃO ---
         
         if dialog.exec():
             formula_original.__dict__.update(dialog.get_dados_formula().__dict__)
@@ -792,7 +955,7 @@ class AbaConteudo(QWidget):
             no_modelo.titulo = item.text(column)
             if self.arvore_capitulos.currentItem() is item:
                 self.label_capitulo_atual.setText(f"Editando: {no_modelo.titulo}")
-                
+            
     def sincronizar_conteudo_pendente(self):
         self._salvar_conteudo_capitulo()
         

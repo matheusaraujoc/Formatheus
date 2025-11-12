@@ -1,5 +1,7 @@
 # gerenciador_projeto.py
 # Descrição: Versão corrigida para salvar brasões e fórmulas corretamente.
+# ATUALIZAÇÃO (Gráfico): Adiciona lógica para salvar/carregar
+# os arquivos de imagem (.png) e dados (.chartjson) dos gráficos.
 
 import os
 import json
@@ -10,7 +12,7 @@ import copy
 from PIL import Image
 
 from documento import (DocumentoABNT, Capitulo, Figura, Formula, Configuracoes,
-                     Autor, Tabela)
+                       Autor, Tabela, Grafico) # <--- ADICIONADO Grafico
 from referencia import Referencia, Livro, Artigo, Site
 import gerenciador_config
 
@@ -72,40 +74,31 @@ class GerenciadorProjetos:
             os.makedirs(formulas_png_dir)
             brasoes_dir = os.path.join(temp_dir, 'brasoes')
             os.makedirs(brasoes_dir)
+            
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            charts_data_dir = os.path.join(temp_dir, 'charts_data_json')
+            os.makedirs(charts_data_dir)
+            # --- FIM DA MODIFICAÇÃO ---
 
             doc_para_salvar = copy.deepcopy(documento)
 
             # --- CORREÇÃO: LÓGICA DE PROCESSAMENTO DO BRASÃO ---
-            #
-            # O problema anterior: O código estava usando o 'caminho_original'
-            # e reprocessando a imagem (sem o corte) usando a função _processar_imagem_brasao.
-            #
-            # A correção: Nós vamos usar o 'caminho_processado', que já 
-            # aponta para a imagem CORTADA (ex: '_brasoes_processados/img_1.png').
-            # Vamos apenas copiar esse arquivo para dentro do zip.
-            #
             cfg = doc_para_salvar.configuracoes
             
             # Processa o brasão esquerdo
-            # Verifica se o caminho da imagem JÁ PROCESSADA (cortada) existe
             if cfg.caminho_brasao_esquerdo_processado and os.path.exists(cfg.caminho_brasao_esquerdo_processado):
                 try:
-                    # Pega o nome do arquivo (ex: 'brasao_original_1.png')
                     nome_arquivo_processado = os.path.basename(cfg.caminho_brasao_esquerdo_processado)
-                    # Define o destino dentro do zip (ex: temp_dir/brasoes/brasao_original_1.png)
                     caminho_destino = os.path.join(brasoes_dir, nome_arquivo_processado)
                     
-                    # Copia o arquivo JÁ CORTADO para o diretório temporário do zip
                     shutil.copy2(cfg.caminho_brasao_esquerdo_processado, caminho_destino)
                     
-                    # Atualiza o caminho no JSON para ser o caminho RELATIVO dentro do zip
                     cfg.caminho_brasao_esquerdo_processado = os.path.join('brasoes', nome_arquivo_processado).replace('\\', '/')
                     
                 except Exception as e:
                     print(f"Erro ao copiar brasão esquerdo processado: {e}")
-                    cfg.caminho_brasao_esquerdo_processado = None # Falhou, anula o caminho
+                    cfg.caminho_brasao_esquerdo_processado = None
             else:
-                 # Se o caminho processado não existir por algum motivo, zera ele
                  cfg.caminho_brasao_esquerdo_processado = None
 
             # Processa o brasão direito (mesma lógica)
@@ -134,6 +127,23 @@ class GerenciadorProjetos:
                     shutil.copy2(figura.caminho_processado, caminho_destino)
                     figura.caminho_processado = os.path.join('imagens', nome_arquivo).replace('\\', '/')
             
+            # --- INÍCIO: Processa os Gráficos ---
+            for grafico in doc_para_salvar.banco_graficos:
+                # 1. Copia a imagem PNG (para a pasta 'imagens', como uma figura)
+                if grafico.caminho_imagem_processada and os.path.exists(grafico.caminho_imagem_processada):
+                    nome_imagem = os.path.basename(grafico.caminho_imagem_processada)
+                    caminho_destino_img = os.path.join(imagens_dir, nome_imagem)
+                    shutil.copy2(grafico.caminho_imagem_processada, caminho_destino_img)
+                    grafico.caminho_imagem_processada = os.path.join('imagens', nome_imagem).replace('\\', '/')
+                
+                # 2. Copia os dados JSON (para a pasta 'charts_data_json')
+                if grafico.caminho_dados_json and os.path.exists(grafico.caminho_dados_json):
+                    nome_json = os.path.basename(grafico.caminho_dados_json)
+                    caminho_destino_json = os.path.join(charts_data_dir, nome_json)
+                    shutil.copy2(grafico.caminho_dados_json, caminho_destino_json)
+                    grafico.caminho_dados_json = os.path.join('charts_data_json', nome_json).replace('\\', '/')
+            # --- FIM: Processa os Gráficos ---
+
             # Processa as fórmulas (SVG e PNG)
             for formula in doc_para_salvar.banco_formulas:
                 if formula.caminho_svg and os.path.exists(formula.caminho_svg):
@@ -180,8 +190,6 @@ class GerenciadorProjetos:
         # Atualiza o caminho dos brasões
         cfg = documento_carregado.configuracoes
         
-        # CORREÇÃO 2: Ao carregar, usar o caminho do arquivo processado, não o original
-        # (Seu código original já fazia isso corretamente, mantido como está)
         if cfg.caminho_brasao_esquerdo_processado:
             cfg.caminho_brasao_esquerdo_processado = os.path.join(self.diretorio_temporario_atual, cfg.caminho_brasao_esquerdo_processado.replace('/', os.path.sep))
         if cfg.caminho_brasao_direito_processado:
@@ -191,6 +199,14 @@ class GerenciadorProjetos:
         for figura in documento_carregado.banco_figuras:
             if figura.caminho_processado:
                 figura.caminho_processado = os.path.join(self.diretorio_temporario_atual, figura.caminho_processado.replace('/', os.path.sep))
+
+        # --- INÍCIO: Atualiza os caminhos dos Gráficos ---
+        for grafico in documento_carregado.banco_graficos:
+            if grafico.caminho_imagem_processada:
+                grafico.caminho_imagem_processada = os.path.join(self.diretorio_temporario_atual, grafico.caminho_imagem_processada.replace('/', os.path.sep))
+            if grafico.caminho_dados_json:
+                grafico.caminho_dados_json = os.path.join(self.diretorio_temporario_atual, grafico.caminho_dados_json.replace('/', os.path.sep))
+        # --- FIM: Atualiza os caminhos dos Gráficos ---
 
         # Atualiza os caminhos das fórmulas
         for formula in documento_carregado.banco_formulas:

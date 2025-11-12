@@ -1,12 +1,12 @@
 # gerador_preview.py
 # Descrição: Versão com lógica de quebra de palavras longas (word-break)
 # e CSS de alinhamento de brasão corrigido.
-# ATUALIZAÇÃO: Adicionada lógica para renderizar {{Lista:Titulo}}.
+# ATUALIZAÇÃO (Gráfico): Adicionada lógica para renderizar {{Grafico:Titulo}}.
 
 import os
 import re
 import math
-from documento import DocumentoABNT, Capitulo, ItemLista # <--- ADICIONADO ItemLista
+from documento import DocumentoABNT, Capitulo, ItemLista, Grafico # <--- ADICIONADO Grafico
 from PIL import Image, ImageFont 
 
 # --- CONSTANTES DE ESTIMATIVA DE ALTURA (EM CM) ---
@@ -17,7 +17,6 @@ ALTURA_LEGENDA = 1.2
 ALTURA_LINHA_TABELA = 0.8
 LARGURA_CONTEUDO_CM = 16.0 
 RECUO_PRIMEIRA_LINHA_CM = 1.25
-#CARACTERES_POR_LINHA = 69 # <--- Não usamos mais isso
 
 class GeradorHTMLPreview:
     def __init__(self, doc_abnt: DocumentoABNT):
@@ -29,7 +28,8 @@ class GeradorHTMLPreview:
         self.contador_tabelas = 0
         self.contador_figuras = 0
         self.contador_formulas = 0
-        self.contador_listas = 0 # <--- NOVO CONTADOR
+        self.contador_listas = 0
+        self.contador_graficos = 0 # <--- NOVO CONTADOR
         self.classe_pagina_atual = 'pagina'
         self.is_artigo = self.doc_abnt.configuracoes.tipo_trabalho == "Artigo Científico"
 
@@ -186,7 +186,7 @@ class GeradorHTMLPreview:
                 simular_adicao_bloco(ALTURA_TITULO_SECAO)
                 
                 if no_filho.conteudo:
-                    padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}" # <--- REGEX ATUALIZADO
+                    padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista|Grafico):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}" # <--- REGEX ATUALIZADO
                     partes = re.split(padrao, no_filho.conteudo)
                     is_continuacao_paragrafo = False
                     
@@ -243,6 +243,17 @@ class GeradorHTMLPreview:
                                             altura_estimada += ALTURA_LEGENDA
                                         simular_adicao_bloco(altura_estimada)
                                 # --- FIM: LÓGICA DE ESTIMATIVA DA LISTA ---
+
+                                # --- INÍCIO: ESTIMATIVA DO GRÁFICO ---
+                                elif tipo_obj == "Grafico":
+                                    obj = next((g for g in self.doc_abnt.banco_graficos if g.titulo == titulo_obj), None)
+                                    if obj:
+                                        caminho_img = obj.caminho_imagem_processada
+                                        aspect_ratio = self._get_image_aspect_ratio(caminho_img)
+                                        altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                        # Altura = Imagem + Legenda Superior + Legenda Inferior (Fonte)
+                                        simular_adicao_bloco(altura_imagem_cm + (ALTURA_LEGENDA * 2))
+                                # --- FIM: ESTIMATIVA DO GRÁFICO ---
                             
                             elif comando:
                                 if comando == "QUEBRA_PAGINA":
@@ -568,7 +579,7 @@ class GeradorHTMLPreview:
             self._adicionar_elemento_bloco(f"<h1 id='{id_ancora}'>{titulo_texto}</h1>", ALTURA_TITULO_SECAO)
             
             if no_filho.conteudo:
-                padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}" # <--- REGEX ATUALIZADO
+                padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista|Grafico):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}" # <--- REGEX ATUALIZADO
                 partes = re.split(padrao, no_filho.conteudo)
                 
                 is_continuacao_paragrafo = False
@@ -620,7 +631,6 @@ class GeradorHTMLPreview:
                                     altura_total_bloco = altura_imagem_cm + ALTURA_LEGENDA
                                     self._adicionar_elemento_bloco(self._renderizar_formula_html(obj), altura_total_bloco)
                             
-                            # --- INÍCIO: LÓGICA DE RENDERIZAÇÃO DA LISTA ---
                             elif tipo_obj == "Lista":
                                 obj = next((l for l in self.doc_abnt.banco_listas if l.titulo == titulo_obj), None)
                                 if obj:
@@ -631,7 +641,19 @@ class GeradorHTMLPreview:
                                         return count
                                     altura = (contar_itens(obj.raiz) * (ALTURA_LINHA_TEXTO * 1.1)) + (ALTURA_LEGENDA if obj.mostrar_titulo else 0)
                                     self._adicionar_elemento_bloco(self._renderizar_lista_html(obj), altura)
-                            # --- FIM: LÓGICA DE RENDERIZAÇÃO DA LISTA ---
+                            
+                            # --- INÍCIO: RENDERIZAÇÃO HTML DO GRÁFICO ---
+                            elif tipo_obj == "Grafico":
+                                obj = next((g for g in self.doc_abnt.banco_graficos if g.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_graficos += 1; obj.numero = self.contador_graficos
+                                    caminho_img = obj.caminho_imagem_processada
+                                    aspect_ratio = self._get_image_aspect_ratio(caminho_img) 
+                                    altura_imagem_cm = obj.largura_cm * aspect_ratio
+                                    altura_total_bloco = altura_imagem_cm + (ALTURA_LEGENDA * 2)
+                                    # Usa a nova função de renderização
+                                    self._adicionar_elemento_bloco(self._renderizar_grafico_html(obj), altura_total_bloco)
+                            # --- FIM: RENDERIZAÇÃO HTML DO GRÁFICO ---
                             
                         elif comando:
                             if comando == "QUEBRA_PAGINA":
@@ -645,8 +667,10 @@ class GeradorHTMLPreview:
 
                         is_continuacao_paragrafo = False
                     
-                    idx += 4
-                            
+                        idx += 4
+                    else:
+                        idx += 1
+                        
             self._renderizar_secoes_recursivamente_html(no_filho, f"{numero_completo}.")
     
     # --- INÍCIO: NOVO MÉTODO PARA RENDERIZAR LISTA HTML ---
@@ -763,6 +787,20 @@ class GeradorHTMLPreview:
         if figura.fonte: html += f'<p class="fonte">Fonte: {figura.fonte}</p>'
         html += '</div>'
         return html
+
+    # --- INÍCIO: NOVO MÉTODO PARA RENDERIZAR GRÁFICO HTML ---
+    def _renderizar_grafico_html(self, grafico): # O tipo é Grafico
+        """Gera o HTML para um Gráfico (idêntico a Figura, muda o texto)."""
+        caminho_abs = os.path.abspath(grafico.caminho_imagem_processada)
+        url_local = f"file:///{caminho_abs.replace(os.path.sep, '/')}"
+        
+        html = f'<div><p class="legenda">Gráfico {grafico.numero} – {grafico.titulo}</p>'
+        html += f'<img src="{url_local}" style="width: {grafico.largura_cm}cm;">'
+        if grafico.fonte: 
+            html += f'<p class="fonte">Fonte: {grafico.fonte}</p>'
+        html += '</div>'
+        return html
+    # --- FIM: NOVO MÉTODO ---
 
     def _renderizar_formula_html(self, formula):
         caminho_abs = os.path.abspath(formula.caminho_svg or formula.caminho_processado_png)

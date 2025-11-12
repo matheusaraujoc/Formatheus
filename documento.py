@@ -220,6 +220,28 @@ class ListaABNT:
             "raiz": self.raiz.to_dict()
         }
 
+class Grafico:
+    """Armazena os dados de um gráfico (que é tratado como uma Figura)."""
+    def __init__(self, titulo: str = "", fonte: str = ""):
+        self.titulo: str = titulo
+        self.fonte: str = fonte
+        self.caminho_imagem_processada: str = ""
+        self.caminho_dados_json: str = "" # Caminho para os dados de edição
+        self.largura_cm: float = 12.0
+        self.numero: int = 0
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Grafico:
+        grafico = cls()
+        for key, value in data.items():
+            if hasattr(grafico, key):
+                setattr(grafico, key, value)
+        return grafico
+
+    def to_dict(self) -> dict:
+        """Converte a instância em um dicionário para salvar."""
+        return self.__dict__
+
 
 class DocumentoABNT:
     """
@@ -237,6 +259,7 @@ class DocumentoABNT:
         self.banco_figuras: list[Figura] = []
         self.banco_formulas: list[Formula] = []
         self.banco_listas: list[ListaABNT] = []
+        self.banco_graficos: list[Grafico] = [] # <--- ADICIONADO
         self.referencias: list = []
 
     def ordenar_referencias(self):
@@ -271,6 +294,7 @@ class DocumentoABNT:
         doc.banco_figuras = [Figura.from_dict(d) for d in data.get('banco_figuras', [])]
         doc.banco_formulas = [Formula.from_dict(d) for d in data.get('banco_formulas', [])]
         doc.banco_listas = [ListaABNT.from_dict(d) for d in data.get('banco_listas', [])]
+        doc.banco_graficos = [Grafico.from_dict(d) for d in data.get('banco_graficos', [])] # <--- ADICIONADO
         
         doc.referencias = []
         try:
@@ -338,5 +362,6 @@ class DocumentoABNT:
             "banco_figuras": [figura.to_dict() for figura in self.banco_figuras],
             "banco_formulas": [formula.to_dict() for formula in self.banco_formulas],
             "banco_listas": [lista.to_dict() for lista in self.banco_listas],
+            "banco_graficos": [grafico.to_dict() for grafico in self.banco_graficos], # <--- ADICIONADO
             "referencias": referencias_serializadas
         }
