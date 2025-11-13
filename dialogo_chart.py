@@ -3,14 +3,14 @@
 # Descrição: Adaptação do gerador de gráfico Matplotlib (v37)
 # para um QDialog integrado ao Formatheus.
 #
-# ATUALIZAÇÃO (v46 - Correção de Performance):
-# 1. Debouncer (QTimer): Adicionado um QTimer de 500ms
-#    para "debater" as chamadas de redraw.
-# 2. Trigger Redraw: Controles não chamam mais self.redraw
-#    diretamente. Eles chamam self.trigger_redraw.
-# 3. trigger_redraw: Esta função (re)inicia o timer. O gráfico
-#    só é redesenhado 500ms após a *última* alteração,
-#    evitando "crashes" ao adicionar muitos dados.
+# ATUALIZAÇÃO (v55 - Correção de "Crash" com Enter):
+# 1. Corrigido o "crash" (fechamento acidental) ao pressionar
+#    Enter. O botão "OK" foi configurado para não ser mais
+#    o botão padrão, impedindo que a tecla Enter usada na
+#    edição de dados acione o fechamento do diálogo.
+# 2. Corrigido UserWarning ao não tentar desenhar legenda
+#    para gráficos do tipo Boxplot (que não possuem labels).
+# 3. Mantém as melhorias da v54 (Multi-Série, Excel, Altura).
 #
 
 import sys
@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QGroupBox, QFormLayout, QTreeWidget, QTreeWidgetItem,
     QHeaderView, QColorDialog, QScrollArea, QStackedWidget,
     QMainWindow, QTabWidget, QDialog, QDialogButtonBox, QSplitter,
-    QGridLayout, QSlider, QToolButton, QStyle
+    QGridLayout, QSlider, QToolButton, QStyle, QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt, Slot, QSize
 from PySide6.QtGui import (
@@ -136,11 +136,14 @@ class DataSourcePanel(QWidget):
         self.dataset_cb.addItems(['Personalizado'] + list(SAMPLE_DATASETS.keys()))
         self.dataset_cb.currentIndexChanged.connect(self._emit_change)
         
-        self.load_csv_btn = QPushButton('Carregar CSV...')
-        self.load_csv_btn.clicked.connect(self.load_csv)
+        # --- MODIFICAÇÃO (v54 - Suporte a Excel) ---
+        self.load_file_btn = QPushButton('Carregar Dados...')
+        self.load_file_btn.clicked.connect(self._load_data_file)
         
         top_data_layout.addWidget(self.dataset_cb)
-        top_data_layout.addWidget(self.load_csv_btn)
+        top_data_layout.addWidget(self.load_file_btn)
+        # --- FIM DA MODIFICAÇÃO ---
+        
         data_layout_main.addLayout(top_data_layout)
 
         # 2. Painel da Árvore (para "Personalizado")
@@ -188,19 +191,23 @@ class DataSourcePanel(QWidget):
         
         self.label_col_cb = QComboBox()
         self.label_col_cb.currentIndexChanged.connect(self._emit_change)
-        self.csv_label_label = QLabel('Coluna Rótulo (Texto):')
+        self.csv_label_label = QLabel('Coluna Rótulo X (Texto):')
         
         self.x_col_cb = QComboBox()
         self.x_col_cb.currentIndexChanged.connect(self._emit_change)
-        self.csv_x_label = QLabel('Coluna X (Numérico):')
+        self.csv_x_label = QLabel('Coluna Eixo X (Numérico):')
         
-        self.y_col_cb = QComboBox()
-        self.y_col_cb.currentIndexChanged.connect(self._emit_change)
-        self.csv_y_label = QLabel('Coluna Y (Numérico):')
+        # --- MODIFICAÇÃO (v54 - Multi-Série) ---
+        self.y_list_widget = QListWidget()
+        self.y_list_widget.setMinimumHeight(100) # Espaço para ver as colunas
+        self.y_list_widget.itemChanged.connect(self._emit_change)
+        self.csv_y_label = QLabel('Colunas Y (Séries):')
+        # --- FIM DA MODIFICAÇÃO ---
         
         csv_layout.addRow(self.csv_label_label, self.label_col_cb)
         csv_layout.addRow(self.csv_x_label, self.x_col_cb)
-        csv_layout.addRow(self.csv_y_label, self.y_col_cb)
+        csv_layout.addRow(self.csv_y_label, self.y_list_widget) # Modificado
+        
         self.csv_controls_widget.setLayout(csv_layout)
         
         # 4. Painel Dinâmico (StackedWidget)
@@ -274,60 +281,104 @@ class DataSourcePanel(QWidget):
         self.on_change() # <-- Isto chama o trigger_redraw()
 
     def _populate_csv_controls(self, df):
-        self.x_col_cb.clear(); self.y_col_cb.clear(); self.label_col_cb.clear()
+        self.x_col_cb.clear(); self.label_col_cb.clear()
+        
+        # --- MODIFICAÇÃO (v54 - Multi-Série) ---
+        self.y_list_widget.clear()
+        # --- FIM DA MODIFICAÇÃO ---
+        
         if df is None: return
         columns = list(df.columns)
         self.x_col_cb.addItems(columns)
-        self.y_col_cb.addItems(columns)
         self.label_col_cb.addItems(columns)
+        
+        # --- MODIFICAÇÃO (v54 - Multi-Série) ---
+        # Popula o QListWidget com checkboxes
+        for col in columns:
+            item = QListWidgetItem(col)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.y_list_widget.addItem(item)
+        # --- FIM DA MODIFICAÇÃO ---
     
     @Slot()
     def _on_dataset_changed(self, chart_type='Barras', settings_panel=None):
         dataset_name = self.dataset_cb.currentText()
-        is_pie = (chart_type == 'Pizza')
-        is_bar = (chart_type == 'Barras')
-        is_categorical_x = (is_bar or is_pie)
-        is_single_value = (chart_type in ['Histograma', 'Boxplot'])
         
         if dataset_name == 'Personalizado': self.data_panel_stack.setCurrentIndex(0)
         else: self.data_panel_stack.setCurrentIndex(1)
+
+        # --- MODIFICAÇÃO (v54 - Lógica de visibilidade) ---
+        is_categorical_x = (chart_type in ['Barras', 'Pizza'])
+        is_xy_types = (chart_type in ['Linha', 'Dispersão'])
+        is_multi_value = (chart_type in ['Histograma', 'Boxplot'])
         
         if settings_panel:
-            settings_panel.update_visibility(is_pie, is_bar, is_categorical_x, is_single_value)
+            is_pie = (chart_type == 'Pizza')
+            is_bar = (chart_type == 'Barras')
+            settings_panel.update_visibility(is_pie, is_bar, is_categorical_x, is_multi_value)
             
+        # Visibilidade dos painéis de dados (CSV)
+        self.csv_label_label.setVisible(is_categorical_x)
+        self.label_col_cb.setVisible(is_categorical_x)
+        
+        self.csv_x_label.setVisible(is_xy_types)
+        self.x_col_cb.setVisible(is_xy_types)
+        
+        self.csv_y_label.setVisible(True) # Sempre visível no modo CSV
+        self.y_list_widget.setVisible(True)
+        
+        if is_multi_value:
+            self.csv_y_label.setText("Colunas de Dados (Valores):")
+        else:
+            self.csv_y_label.setText("Colunas Y (Séries):")
+
+        # Visibilidade dos cabeçalhos da árvore (Personalizado)
         if is_categorical_x: # Barras, Pizza
             self.series_tree.setHeaderLabels(["Rótulo X (Texto)", "(Ignorado)", "Valor Y (Numérico)", "Cor"])
-            self.csv_label_label.setVisible(True); self.label_col_cb.setVisible(True)
-            self.csv_x_label.setVisible(False); self.x_col_cb.setVisible(False)
-            self.csv_y_label.setVisible(True); self.y_col_cb.setVisible(True)
-        elif is_single_value: # Histograma, Boxplot
-            self.series_tree.setHeaderLabels(["(Ignorado)", "Valores X (Numérico)", "(Ignorado)", "Cor"])
-            self.csv_label_label.setVisible(False); self.label_col_cb.setVisible(False)
-            self.csv_x_label.setVisible(True); self.x_col_cb.setVisible(True)
-            self.csv_y_label.setVisible(False); self.y_col_cb.setVisible(False)
+        elif is_multi_value: # Histograma, Boxplot
+            self.series_tree.setHeaderLabels(["Série", "Valores (Numérico)", "(Ignorado)", "Cor"])
+            # Renomeia o cabeçalho X para "Valores"
+            self.series_tree.headerItem().setText(1, "Valores (Numérico)")
         else: # Linha, Dispersão
-            self.series_tree.setHeaderLabels(["(Ignorado)", "Ponto X (Numérico)", "Ponto Y (Numérico)", "Cor"])
-            self.csv_label_label.setVisible(False); self.label_col_cb.setVisible(False)
-            self.csv_x_label.setVisible(True); self.x_col_cb.setVisible(True)
-            self.csv_y_label.setVisible(True); self.y_col_cb.setVisible(True)
+            self.series_tree.setHeaderLabels(["Série", "Ponto X (Numérico)", "Ponto Y (Numérico)", "Cor"])
+            self.series_tree.headerItem().setText(1, "Ponto X (Numérico)")
+        # --- FIM DA MODIFICAÇÃO ---
         
         if dataset_name == 'CSV Carregado' and settings_panel:
             settings_panel.title_input.setText('Dados do CSV')
 
     @Slot()
-    def load_csv(self):
-        path, _ = QFileDialog.getOpenFileName(self, 'Carregar CSV', filter='CSV Files (*.csv);;All Files (*)')
+    def _load_data_file(self): # Renomeado (v54)
+        # --- MODIFICAÇÃO (v54 - Suporte a Excel) ---
+        filter = "Arquivos de Dados (*.csv *.xlsx);;Arquivos CSV (*.csv);;Arquivos Excel (*.xlsx);;Todos os Arquivos (*)"
+        path, _ = QFileDialog.getOpenFileName(self, 'Carregar Dados', filter=filter)
         if not path: return
+        
         try:
-            self.df = pd.read_csv(path)
+            if path.lower().endswith('.csv'):
+                self.df = pd.read_csv(path)
+            elif path.lower().endswith('.xlsx'):
+                self.df = pd.read_excel(path)
+            else:
+                raise ValueError("Formato de arquivo não suportado. Use .csv ou .xlsx")
+                
+            # --- FIM DA MODIFICAÇÃO ---
+            
             self._populate_csv_controls(self.df)
             if self.dataset_cb.findText('CSV Carregado') == -1: self.dataset_cb.addItem('CSV Carregado')
             self.dataset_cb.setCurrentText('CSV Carregado')
+            
+            # Tenta adivinhar as colunas (Ex: 1ª texto, 2ª num, 3ª num)
             if len(self.df.columns) > 0: self.label_col_cb.setCurrentIndex(0)
             if len(self.df.columns) > 1: self.x_col_cb.setCurrentIndex(1)
-            if len(self.df.columns) > 2: self.y_col_cb.setCurrentIndex(2)
+            # Tenta marcar a 3ª coluna no Y-List
+            if len(self.df.columns) > 2:
+                item = self.y_list_widget.item(2)
+                if item: item.setCheckState(Qt.CheckState.Checked)
+            
         except Exception as e:
-            QMessageBox.critical(self, 'Erro ao Carregar', f'Não foi possível ler o CSV:\n{e}')
+            QMessageBox.critical(self, 'Erro ao Carregar', f'Não foi possível ler o arquivo:\n{e}')
             self.df = None
             self.dataset_cb.setCurrentText('Personalizado')
             
@@ -348,10 +399,20 @@ class DataSourcePanel(QWidget):
                     'color': series_item.data(0, Qt.ItemDataRole.UserRole),
                     'label_data': label_data, 'x_data': x_data, 'y_data': y_data
                 })
+        
+        # --- MODIFICAÇÃO (v54 - Multi-Série) ---
+        y_cols_selected = []
+        for i in range(self.y_list_widget.count()):
+            item = self.y_list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                y_cols_selected.append(item.text())
+        # --- FIM DA MODIFICAÇÃO ---
+                
         return {
             'dataset': self.dataset_cb.currentText(), 'df': self.df, 
             'series_data': series_data, 'label_col': self.label_col_cb.currentText(),
-            'x_col': self.x_col_cb.currentText(), 'y_col': self.y_col_cb.currentText(),
+            'x_col': self.x_col_cb.currentText(), 
+            'y_cols': y_cols_selected, # Modificado
         }
         
     def get_state_for_save(self):
@@ -375,7 +436,20 @@ class DataSourcePanel(QWidget):
                     self.df = None
             self.label_col_cb.setCurrentText(state.get('label_col', ''))
             self.x_col_cb.setCurrentText(state.get('x_col', ''))
-            self.y_col_cb.setCurrentText(state.get('y_col', ''))
+            
+            # --- MODIFICAÇÃO (v54 - Multi-Série) ---
+            # Define os itens checados no QListWidget
+            y_cols_to_check = state.get('y_cols', [])
+            self.y_list_widget.itemChanged.disconnect(self._emit_change) # Desconecta temporariamente
+            for i in range(self.y_list_widget.count()):
+                item = self.y_list_widget.item(i)
+                if item.text() in y_cols_to_check:
+                    item.setCheckState(Qt.CheckState.Checked)
+                else:
+                    item.setCheckState(Qt.CheckState.Unchecked)
+            self.y_list_widget.itemChanged.connect(self._emit_change) # Reconecta
+            # --- FIM DA MODIFICAÇÃO ---
+
             self.series_tree.clear()
             series_data_list = state.get('series_data', [])
             for series_data in series_data_list:
@@ -430,7 +504,9 @@ COMPACT_STYLESHEET = """
     SettingsPanel#ChartSettingsPanel QSlider {
         min-height: 20px;
     }
-    SettingsPanel#ChartSettingsPanel QLabel#FigureWidthLabel {
+    /* MODIFICAÇÃO (v54): Seletores de Largura/Altura */
+    SettingsPanel#ChartSettingsPanel QLabel#FigureWidthLabel,
+    SettingsPanel#ChartSettingsPanel QLabel#FigureHeightLabel {
         font-size: 12px;
         font-weight: bold;
         padding: 3px;
@@ -512,7 +588,7 @@ class SettingsPanel(QWidget):
         layout = QFormLayout(self.tab_geral)
         
         self.type_cb = QComboBox()
-        self.type_cb.addItems(['Barras', 'Pizza', 'Linha', 'Dispersão', 'Histograma', 'Boxplot'])
+        self.type_cb.addItems(['Barras', 'Linha', 'Dispersão', 'Pizza', 'Histograma', 'Boxplot'])
         layout.addRow('Tipo:', self.type_cb)
 
         self.title_input = QLineEdit()
@@ -537,35 +613,65 @@ class SettingsPanel(QWidget):
         self.largura_docx_combo.addItems(["Pequena (8 cm)", "Média (12 cm)", "Grande (Largura Máxima)"])
         layout.addRow("Largura (DOCX):", self.largura_docx_combo)
         
-        # --- INÍCIO DA MODIFICAÇÃO (v45) ---
-        slider_layout = QHBoxLayout()
-        slider_layout.setContentsMargins(0, 0, 0, 0)
+        # --- MODIFICAÇÃO (v54 - Slider de Largura) ---
+        slider_layout_w = QHBoxLayout()
+        slider_layout_w.setContentsMargins(0, 0, 0, 0)
         
         self.figure_width_slider = QSlider(Qt.Orientation.Horizontal)
         self.figure_width_slider.setMinimum(50)  # 5.0 polegadas * 10
         self.figure_width_slider.setMaximum(150) # 15.0 polegadas * 10
-        self.figure_width_slider.setValue(50)    # 5.0 polegadas * 10
+        self.figure_width_slider.setValue(80)    # 8.0 polegadas * 10
         self.figure_width_slider.setSingleStep(5) # 0.5 polegadas
         self.figure_width_slider.setTickInterval(10) # 1.0 polegadas
         self.figure_width_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         
-        self.figure_width_label = QLabel("5.0 pol")
+        self.figure_width_label = QLabel("8.0 pol")
         self.figure_width_label.setObjectName("FigureWidthLabel")
         
         self.figure_width_reset_btn = QToolButton()
         self.figure_width_reset_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton))
-        self.figure_width_reset_btn.setToolTip("Redefinir para 5.0 polegadas")
+        self.figure_width_reset_btn.setToolTip("Redefinir para 8.0 polegadas")
         
-        slider_layout.addWidget(self.figure_width_slider)
-        slider_layout.addWidget(self.figure_width_label)
-        slider_layout.addWidget(self.figure_width_reset_btn)
+        slider_layout_w.addWidget(self.figure_width_slider)
+        slider_layout_w.addWidget(self.figure_width_label)
+        slider_layout_w.addWidget(self.figure_width_reset_btn)
         
-        self.figure_width_slider.valueChanged.connect(self._on_slider_value_changed)
-        self.figure_width_slider.sliderReleased.connect(self._on_slider_released)
-        self.figure_width_reset_btn.clicked.connect(self._on_slider_reset)
-        # --- FIM DA MODIFICAÇÃO (v45) ---
+        self.figure_width_slider.valueChanged.connect(self._on_width_slider_value_changed)
+        self.figure_width_slider.sliderReleased.connect(self._on_width_slider_released)
+        self.figure_width_reset_btn.clicked.connect(self._on_width_slider_reset)
 
-        layout.addRow("Largura (Prévia):", slider_layout)
+        layout.addRow("Largura (Prévia):", slider_layout_w)
+        # --- FIM DA MODIFICAÇÃO (v54) ---
+
+        # --- INÍCIO DA MODIFICAÇÃO (v54 - Slider de Altura) ---
+        slider_layout_h = QHBoxLayout()
+        slider_layout_h.setContentsMargins(0, 0, 0, 0)
+        
+        self.figure_height_slider = QSlider(Qt.Orientation.Horizontal)
+        self.figure_height_slider.setMinimum(30)  # 3.0 polegadas * 10
+        self.figure_height_slider.setMaximum(120) # 12.0 polegadas * 10
+        self.figure_height_slider.setValue(50)    # 5.0 polegadas * 10
+        self.figure_height_slider.setSingleStep(5)
+        self.figure_height_slider.setTickInterval(10)
+        self.figure_height_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        
+        self.figure_height_label = QLabel("5.0 pol")
+        self.figure_height_label.setObjectName("FigureHeightLabel")
+        
+        self.figure_height_reset_btn = QToolButton()
+        self.figure_height_reset_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton))
+        self.figure_height_reset_btn.setToolTip("Redefinir para 5.0 polegadas")
+        
+        slider_layout_h.addWidget(self.figure_height_slider)
+        slider_layout_h.addWidget(self.figure_height_label)
+        slider_layout_h.addWidget(self.figure_height_reset_btn)
+        
+        self.figure_height_slider.valueChanged.connect(self._on_height_slider_value_changed)
+        self.figure_height_slider.sliderReleased.connect(self._on_height_slider_released)
+        self.figure_height_reset_btn.clicked.connect(self._on_height_slider_reset)
+        
+        layout.addRow("Altura (Prévia):", slider_layout_h)
+        # --- FIM DA MODIFICAÇÃO (v54) ---
 
     def _create_eixos_tab(self):
         """Cria os widgets da segunda aba 'Eixos'."""
@@ -665,23 +771,36 @@ class SettingsPanel(QWidget):
         
         self._update_legend_visibility()
 
+    # --- MODIFICAÇÃO (v54): Handlers para sliders de Largura e Altura ---
     @Slot(int)
-    def _on_slider_value_changed(self, value):
-        """Atualiza o label do slider em tempo real."""
+    def _on_width_slider_value_changed(self, value):
         float_val = value / 10.0
         self.figure_width_label.setText(f"{float_val:.1f} pol")
     
     @Slot()
-    def _on_slider_released(self):
-        """Aciona o redraw (se live) ao soltar o slider."""
+    def _on_width_slider_released(self):
         self._emit_change()
         
     @Slot()
-    def _on_slider_reset(self):
-        """Reseta o slider para o valor padrão (5.0)."""
-        self.figure_width_slider.setValue(50)
-        self._emit_change() # Aciona o redraw
+    def _on_width_slider_reset(self):
+        self.figure_width_slider.setValue(80) # Padrão 8.0
+        self._emit_change()
 
+    @Slot(int)
+    def _on_height_slider_value_changed(self, value):
+        float_val = value / 10.0
+        self.figure_height_label.setText(f"{float_val:.1f} pol")
+    
+    @Slot()
+    def _on_height_slider_released(self):
+        self._emit_change()
+        
+    @Slot()
+    def _on_height_slider_reset(self):
+        self.figure_height_slider.setValue(50) # Padrão 5.0
+        self._emit_change()
+    # --- FIM DA MODIFICAÇÃO (v54) ---
+    
     @Slot()
     def _emit_change(self, *args):
         if hasattr(self, 'live_cb') and self.live_cb.isChecked(): 
@@ -748,30 +867,30 @@ class SettingsPanel(QWidget):
         }
         return key_map.get(key, ('Automático', 'Automático', 'Automático'))
 
-    def update_visibility(self, is_pie, is_bar, is_categorical_x, is_single_value):
+    def update_visibility(self, is_pie, is_bar, is_categorical_x, is_multi_value):
         """Atualiza a visibilidade dos controles com base no tipo de gráfico."""
         
         self.xlabel_input.setVisible(not is_pie); self.ylabel_input.setVisible(not is_pie)
         self.xlabel_label.setVisible(not is_pie); self.ylabel_label.setVisible(not is_pie)
         
-        show_x_limits_and_interval = not (is_categorical_x or is_single_value or is_pie)
+        show_x_limits_and_interval = not (is_categorical_x or is_multi_value or is_pie)
         
         self.x_min_label.setVisible(show_x_limits_and_interval)
         self.x_min_input.setVisible(show_x_limits_and_interval)
         self.x_max_label.setVisible(show_x_limits_and_interval)
         self.x_max_input.setVisible(show_x_limits_and_interval)
         
-        self.y_min_label.setVisible(not is_pie)
-        self.y_min_input.setVisible(not is_pie)
-        self.y_max_label.setVisible(not is_pie)
-        self.y_max_input.setVisible(not is_pie)
+        self.y_min_label.setVisible(not is_pie and not is_multi_value)
+        self.y_min_input.setVisible(not is_pie and not is_multi_value)
+        self.y_max_label.setVisible(not is_pie and not is_multi_value)
+        self.y_max_input.setVisible(not is_pie and not is_multi_value)
         
         self.x_interval_label.setVisible(show_x_limits_and_interval)
         self.x_tick_interval_input.setVisible(show_x_limits_and_interval)
-        self.y_interval_label.setVisible(not is_pie)
-        self.y_tick_interval_input.setVisible(not is_pie)
+        self.y_interval_label.setVisible(not is_pie and not is_multi_value)
+        self.y_tick_interval_input.setVisible(not is_pie and not is_multi_value)
         
-        show_legend = (not is_pie and not is_single_value)
+        show_legend = (not is_pie) # Hist/Boxplot agora podem ter legenda
         self.show_legend_cb.setVisible(show_legend)
         self.legend_type_cb.parentWidget().setVisible(show_legend) # O GroupBox
         self.legend_size_cb.setVisible(show_legend)
@@ -788,7 +907,10 @@ class SettingsPanel(QWidget):
         if "Pequena" in largura_str: largura_cm = 8.0
         elif "Média" in largura_str: largura_cm = 12.0
 
+        # --- MODIFICAÇÃO (v54 - Altura) ---
         figure_width_inches = self.figure_width_slider.value() / 10.0
+        figure_height_inches = self.figure_height_slider.value() / 10.0
+        # --- FIM DA MODIFICAÇÃO ---
 
         return {
             'type': self.type_cb.currentText(), 'title': self.title_input.text(),
@@ -807,6 +929,7 @@ class SettingsPanel(QWidget):
             'live': self.live_cb.isChecked(),
             'largura_cm': largura_cm,
             'figure_width_inches': figure_width_inches,
+            'figure_height_inches': figure_height_inches, # Adicionado
         }
         
     def set_state(self, state):
@@ -859,13 +982,17 @@ class SettingsPanel(QWidget):
         elif largura_cm == 12.0: self.largura_docx_combo.setCurrentIndex(1)
         else: self.largura_docx_combo.setCurrentIndex(2)
         
-        # --- INÍCIO DA MODIFICAÇÃO (v45) ---
-        # Garante que o valor carregado não seja menor que o novo mínimo do slider
-        figure_width_inches = state.get('figure_width_inches', 5.0)
-        slider_val = int(max(5.0, figure_width_inches) * 10) # <-- Garante min 5.0
-        # --- FIM DA MODIFICAÇÃO (v45) ---
-        self.figure_width_slider.setValue(slider_val)
-        self.figure_width_label.setText(f"{slider_val / 10.0:.1f} pol")
+        # --- MODIFICAÇÃO (v54 - Altura) ---
+        figure_width_inches = state.get('figure_width_inches', 8.0)
+        slider_val_w = int(max(5.0, figure_width_inches) * 10)
+        self.figure_width_slider.setValue(slider_val_w)
+        self.figure_width_label.setText(f"{slider_val_w / 10.0:.1f} pol")
+        
+        figure_height_inches = state.get('figure_height_inches', 5.0)
+        slider_val_h = int(max(3.0, figure_height_inches) * 10)
+        self.figure_height_slider.setValue(slider_val_h)
+        self.figure_height_label.setText(f"{slider_val_h / 10.0:.1f} pol")
+        # --- FIM DA MODIFICAÇÃO (v54) ---
         
 # ---------------------------------------------------------------
 # --- CLASSE PRINCIPAL: ChartDialog (QDialog) ---
@@ -906,7 +1033,12 @@ class ChartDialog(QDialog):
         # Conexões
         self.settings_panel.type_cb.currentIndexChanged.connect(self._on_chart_type_changed)
         self.data_panel.dataset_cb.currentIndexChanged.connect(self._on_dataset_type_changed)
+        
+        # --- MODIFICAÇÃO (v54): Conecta ambos os sliders ---
         self.settings_panel.figure_width_slider.sliderReleased.connect(self.trigger_redraw)
+        self.settings_panel.figure_height_slider.sliderReleased.connect(self.trigger_redraw)
+        # --- FIM DA MODIFICAÇÃO ---
+
         self.settings_panel.legend_type_cb.currentTextChanged.connect(self.trigger_redraw)
         self.settings_panel.legend_pos_cb.currentTextChanged.connect(self.trigger_redraw)
         self.settings_panel.legend_align_cb.currentTextChanged.connect(self.trigger_redraw)
@@ -938,6 +1070,15 @@ class ChartDialog(QDialog):
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept) 
         self.buttons.rejected.connect(self.reject)
+        
+        # --- INÍCIO DA MODIFICAÇÃO (v55 - Correção de "Crash") ---
+        # Impede que a tecla "Enter" (usada na entrada de dados)
+        # acione acidentalmente o botão "OK", fechando o diálogo.
+        ok_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        ok_button.setAutoDefault(False)
+        ok_button.setDefault(False)
+        # --- FIM DA MODIFICAÇÃO ---
+
         main_layout.addWidget(self.buttons)
 
         self._carregar_dados_iniciais()
@@ -963,7 +1104,7 @@ class ChartDialog(QDialog):
                 
             except Exception as e:
                 QMessageBox.warning(self, "Erro ao Carregar Dados",
-                                    f"Não foi possível carregar os dados do gráfico salvo:\n{e}\n\nO editor começará com os padrões.")
+                                    f"Não foi possível carregar os dados do gráfico salvo:\n{e}\n\O editor começará com os padrões.")
         
         self.settings_panel.title_input.setText(grafico.titulo)
         self.settings_panel.source_input.setText(grafico.fonte)
@@ -999,31 +1140,86 @@ class ChartDialog(QDialog):
         self.trigger_redraw() # <-- Usa o trigger
 
     # --- Lógica de Plotagem (v45) ---
+    
+    # --- INÍCIO DA MODIFICAÇÃO (v54 - Multi-Série CSV) ---
     def _plot_csv_data(self, ax, s):
-        plot_type = s['type']; df = s['df'] 
-        if plot_type in ['Barras', 'Pizza']: x = df[s['label_col']]; y = df[s['y_col']]
-        elif plot_type in ['Histograma', 'Boxplot']: x = df[s['x_col']]; y = None 
-        else: x = df[s['x_col']]; y = df[s['y_col']]
-        if plot_type == 'Linha': ax.plot(x, y)
-        elif plot_type == 'Dispersão': ax.scatter(x, y)
+        plot_type = s['type']; df = s['df']; y_cols = s['y_cols']
+        
+        if not y_cols:
+            raise ValueError("Nenhuma coluna de dados (Y) foi selecionada.")
+
+        if plot_type in ['Linha', 'Dispersão']:
+            x = df[s['x_col']]
+            for y_col in y_cols:
+                y = df[y_col]
+                if plot_type == 'Linha':
+                    ax.plot(x, y, label=y_col)
+                else:
+                    ax.scatter(x, y, label=y_col)
+                if s['show_data_labels']:
+                    for xi, yi in zip(x, y): ax.text(xi, yi, f' {yi:.2f}', va='bottom', fontsize=8)
+
         elif plot_type == 'Barras':
+            x_labels = df[s['label_col']]
+            num_series = len(y_cols)
+            x_pos = np.arange(len(x_labels))
             align_val = BAR_ALIGN_MAP.get(s['bar_align'], 'center')
-            if x.dtype == 'object' or x.dtype == 'category':
-                grouped_data = y.groupby(x).mean()
-                bars = ax.bar(grouped_data.index, grouped_data.values, align=align_val)
-                if s['show_data_labels']: ax.bar_label(bars, fmt='%.2f')
+            
+            if align_val == 'edge':
+                # No modo 'edge', o matplotlib espera uma largura negativa
+                # para agrupar à esquerda, o que é complexo.
+                # Simulamos 'edge' tratando-o como 'center' com offsets.
+                align_val = 'center'
+
+            if num_series == 1:
+                y_values = df[y_cols[0]]
+                bars = ax.bar(x_labels, y_values, label=y_cols[0], align=align_val)
+                if s['show_data_labels']:
+                    ax.bar_label(bars, fmt='%.2f', padding=3, fontsize=8)
             else:
-                bars = ax.bar(x, y, align=align_val)
-                if s['show_data_labels']: ax.bar_label(bars, fmt='%.2f')
-        elif plot_type == 'Histograma': ax.hist(x, bins=15, edgecolor='k')
-        elif plot_type == 'Boxplot': ax.boxplot(x)
+                total_width = 0.8; bar_width = total_width / num_series
+                for i, y_col in enumerate(y_cols):
+                    y_values = df[y_col]
+                    offset = (i - (num_series - 1) / 2) * bar_width
+                    bars = ax.bar(x_pos + offset, y_values, width=bar_width, label=y_col)
+                    if s['show_data_labels']:
+                        labels_for_bars = [f'{v:.2f}' if v != 0 else '' for v in y_values]
+                        ax.bar_label(bars, labels=labels_for_bars, padding=3, fontsize=8)
+                if len(x_labels): ax.set_xticks(x_pos, x_labels)
+
+        elif plot_type in ['Histograma', 'Boxplot']:
+            data_to_plot = [df[y_col].dropna() for y_col in y_cols]
+            if not data_to_plot:
+                raise ValueError("Colunas selecionadas não contêm dados numéricos.")
+            
+            if plot_type == 'Histograma':
+                for i, y_col in enumerate(y_cols):
+                    ax.hist(data_to_plot[i], bins=15, edgecolor='k', label=y_col, alpha=0.7)
+            else: # Boxplot
+                bp = ax.boxplot(data_to_plot, patch_artist=True)
+                ax.set_xticklabels(y_cols)
+                # Tenta colorir as caixas (opcional)
+                colors = plt.cm.get_cmap('Pastel1', len(y_cols))
+                for patch, color in zip(bp['boxes'], colors(range(len(y_cols)))):
+                    patch.set_facecolor(color)
+                    patch.set_alpha(0.7)
+                    
         elif plot_type == 'Pizza':
-            if x.dtype == 'object' or x.dtype == 'category':
-                grouped_data = y.groupby(x).sum()
-                if any(v < 0 for v in grouped_data.values): raise ValueError("Gráfico de Pizza não aceita valores negativos")
-                ax.pie(grouped_data.values, labels=grouped_data.index, autopct='%1.1f%%', startangle=90)
-                ax.axis('equal')
-            else: ax.text(0.5, 0.5, 'Para Pizza com CSV, selecione\numa Coluna X de Rótulos (texto).', ha='center', va='center', color='red')
+            x_labels = df[s['label_col']]
+            y_col = y_cols[0]
+            if len(y_cols) > 1:
+                # Adiciona aviso ao título se múltiplas colunas foram selecionadas
+                s['title'] += f" (mostrando apenas '{y_col}')"
+                ax.set_title(s['title'], fontsize=12) # Re-aplica o título
+                
+            y = df[y_col]
+            if any(v < 0 for v in y): raise ValueError("Gráfico de Pizza não aceita valores negativos")
+            
+            wedges, texts, autotexts = ax.pie(y, labels=x_labels, autopct='%1.1f%%', startangle=90, textprops={'fontsize': 8})
+            if not s['show_data_labels']:
+                for t in autotexts: t.set_visible(False)
+            ax.axis('equal')
+    # --- FIM DA MODIFICAÇÃO (v54) ---
             
     def _plot_custom_data(self, ax, s):
         series_list = s['series_data']; plot_type = s['type']
@@ -1062,6 +1258,8 @@ class ChartDialog(QDialog):
                 if all_x_labels: ax.set_xticks(x_pos, all_x_labels)
         else:
             all_series_legends = [] 
+            data_to_plot = [] # Para Boxplot
+            
             for i, series in enumerate(series_list):
                 legend = series['legend']; color = series['color']
                 if plot_type in ['Linha', 'Dispersão']:
@@ -1078,10 +1276,7 @@ class ChartDialog(QDialog):
                     if not x: continue
                     all_series_legends.append(legend)
                     if plot_type == 'Histograma': ax.hist(x, bins=15, edgecolor='k', color=color, label=legend, alpha=0.7)
-                    else: 
-                        bp = ax.boxplot(x, positions=[i], widths=0.6, patch_artist=True)
-                        if color:
-                            for patch in bp['boxes']: patch.set_facecolor(color); patch.set_alpha(0.7)
+                    else: data_to_plot.append(x) # Acumula dados para boxplot
                 elif plot_type == 'Pizza':
                     if i > 0: break 
                     x = series['label_data']
@@ -1093,9 +1288,16 @@ class ChartDialog(QDialog):
                     if not s['show_data_labels']:
                         for t in autotexts: t.set_visible(False)
                     ax.axis('equal')
-            if plot_type == 'Boxplot':
-                if all_series_legends: ax.set_xticks(range(len(all_series_legends)), all_series_legends)
-                
+                    
+            if plot_type == 'Boxplot' and data_to_plot:
+                bp = ax.boxplot(data_to_plot, patch_artist=True)
+                if all_series_legends: ax.set_xticklabels(all_series_legends)
+                # Colore as caixas com as cores da série
+                for i, patch in enumerate(bp['boxes']):
+                    color = series_list[i].get('color', '#FFFFFF')
+                    patch.set_facecolor(color)
+                    patch.set_alpha(0.7)
+                        
     @Slot()
     def redraw(self):
         s = {} 
@@ -1104,10 +1306,17 @@ class ChartDialog(QDialog):
             settings_state = self.settings_panel.get_state()
             s = {**data_state, **settings_state}
 
-            figure_width = s.get('figure_width_inches', 5.0)
-            figure_height = figure_width * (4/5) # Mantém proporção
+            # --- MODIFICAÇÃO (v54 - Altura) ---
+            figure_width = s.get('figure_width_inches', 8.0)
+            figure_height = s.get('figure_height_inches', 5.0)
             
-            if self.fig is None or self.fig.get_size_inches()[0] != figure_width:
+            current_size = (0,0)
+            if self.fig:
+                current_size = self.fig.get_size_inches()
+
+            # Recria a figura se o tamanho mudar
+            if self.fig is None or current_size[0] != figure_width or current_size[1] != figure_height:
+            # --- FIM DA MODIFICAÇÃO ---
                 if self.toolbar: self.preview_layout.removeWidget(self.toolbar); self.toolbar.deleteLater()
                 if self.canvas: self.preview_layout.removeWidget(self.canvas); self.canvas.deleteLater()
 
@@ -1135,7 +1344,10 @@ class ChartDialog(QDialog):
                 if s['dataset'] == 'Personalizado': self._plot_custom_data(ax, s)
                 elif 'df' in s and s['df'] is not None: self._plot_csv_data(ax, s)
                 
-                if s['show_legend'] and s['type'] not in ['Pizza', 'Histograma', 'Boxplot']:
+                # --- INÍCIO DA MODIFICAÇÃO (v55 - Correção Warning) ---
+                # Não tenta desenhar legenda para Pizza ou Boxplot
+                if s['show_legend'] and s['type'] not in ['Pizza', 'Boxplot']:
+                # --- FIM DA MODIFICAÇÃO ---
                     loc, bbox = self.settings_panel._compute_legend_pos(
                         s.get('legend_type'), 
                         s.get('legend_pos_main'), 
@@ -1145,9 +1357,13 @@ class ChartDialog(QDialog):
                     ax.legend(loc=loc, bbox_to_anchor=bbox, fontsize=size)
                 
                 if s['type'] not in ['Pizza', 'Barras', 'Boxplot']: ax.set_xlim(left=s['x_min'], right=s['x_max'])
-                if s['type'] != 'Pizza': ax.set_ylim(bottom=s['y_min'], top=s['y_max'])
-                if s['x_interval'] is not None and s['x_interval'] > 0: ax.xaxis.set_major_locator(MultipleLocator(s['x_interval']))
-                if s['y_interval'] is not None and s['y_interval'] > 0: ax.yaxis.set_major_locator(MultipleLocator(s['y_interval']))
+                if s['type'] not in ['Pizza', 'Boxplot']: ax.set_ylim(bottom=s['y_min'], top=s['y_max'])
+                
+                if s['x_interval'] is not None and s['x_interval'] > 0 and s['type'] not in ['Pizza', 'Barras', 'Boxplot']:
+                    ax.xaxis.set_major_locator(MultipleLocator(s['x_interval']))
+                
+                if s['y_interval'] is not None and s['y_interval'] > 0 and s['type'] != 'Pizza':
+                    ax.yaxis.set_major_locator(MultipleLocator(s['y_interval']))
                 
                 # --- REMOVIDO (v45): ax.text para a fonte ABNT ---
                 
@@ -1159,9 +1375,10 @@ class ChartDialog(QDialog):
             error_message = f"Erro nos dados:\n{e}"; error_str = str(e).lower(); chart_type = s.get('type', 'desconhecido')
             if "could not convert string to float" in error_str:
                 if chart_type in ['Linha', 'Dispersão']: error_message = (f"Erro: O gráfico de '{chart_type}' falhou.\nVerifique se 'Valor X' e 'Valor Y' são NÚMEROS.")
-                elif chart_type in ['Histograma', 'Boxplot']: error_message = (f"Erro: O gráfico de '{chart_type}' falhou.\nVerifique se 'Valor X' são NÚMEROS.")
-                elif chart_type == 'Barras' or chart_type == 'Pizza': error_message = (f"Erro: O gráfico de '{chart_type}' falhou.\nVerifique se 'Valor Y' são NÚMEROS.")
+                elif chart_type in ['Histograma', 'Boxplot']: error_message = (f"Erro: O gráfico de '{chart_type}' falhou.\nVerifique se 'Valor X' ou as 'Colunas de Dados' são NÚMEROS.")
+                elif chart_type == 'Barras' or chart_type == 'Pizza': error_message = (f"Erro: O gráfico de '{chart_type}' falhou.\nVerifique se 'Valor Y' ou as 'Colunas Y' são NÚMEROS.")
             elif "different sizes" in error_str: error_message = (f"Erro: Séries têm tamanhos diferentes.\n{e}")
+            elif "no columns" in error_str: error_message = "Erro: Nenhuma coluna de dados (Y) foi selecionada."
             ax.text(0.5, 0.5, error_message, ha='center', va='center', color='red', fontsize=12, wrap=True, bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="red", lw=1))
             self.fig.tight_layout(); self.canvas.draw()
         except Exception as e:

@@ -1,7 +1,15 @@
 # documento.py
 # Descrição: Define as estruturas de dados centrais do projeto.
-# CORREÇÃO: Adicionado de volta o método to_dict() que
-# faltava na classe Formula.
+#
+# ATUALIZAÇÃO (v46 - Bins):
+# 1. Adicionado 'self.bin_name' às classes Tabela, Figura,
+#    Grafico, Formula, e ListaABNT.
+# 2. Atualizado 'to_dict' e 'from_dict' em todas as 5
+#    classes para salvar e carregar o 'bin_name'.
+# 3. Adicionado 'self.banco_bins' ao DocumentoABNT para
+#    salvar os nomes dos bins criados (embora o 'bin_name'
+#    nos ativos seja a fonte da verdade).
+#
 
 from __future__ import annotations
 from typing import Literal
@@ -101,6 +109,7 @@ class Tabela:
         self.numero: int = 0
         self.estilo_borda: str = "abnt"
         self.centralizar_conteudo: bool = True
+        self.bin_name: str | None = None # <--- ADICIONADO
 
     @classmethod
     def from_dict(cls, data: dict) -> Tabela:
@@ -123,6 +132,7 @@ class Figura:
         self.caminho_processado: str = ""
         self.largura_cm: float = 12.0
         self.numero: int = 0
+        self.bin_name: str | None = None # <--- ADICIONADO
 
     @classmethod
     def from_dict(cls, data: dict) -> Figura:
@@ -146,6 +156,7 @@ class Formula:
         self.caminho_processado_png: str = ""
         self.largura_cm: float = 8.0
         self.numero: int = 0
+        self.bin_name: str | None = None # <--- ADICIONADO
 
     @classmethod
     def from_dict(cls, data: dict) -> Formula:
@@ -156,12 +167,9 @@ class Formula:
                 setattr(formula, key, value)
         return formula
     
-    # --- INÍCIO DA CORREÇÃO ---
-    # Este método estava faltando
     def to_dict(self) -> dict:
         """Converte a instância em um dicionário para salvar."""
         return self.__dict__
-    # --- FIM DA CORREÇÃO ---
 
 # --- CLASSES DE LISTA ---
 
@@ -201,12 +209,14 @@ class ListaABNT:
         self.tipo_enumeracao: TipoEnumeracaoLista = "Híbrida (ABNT)"
         self.numero: int = 0 
         self.raiz: ItemLista = ItemLista(texto="Raiz da Lista")
+        self.bin_name: str | None = None # <--- ADICIONADO
 
     @classmethod
     def from_dict(cls, data: dict) -> ListaABNT:
         lista = cls(titulo=data.get('titulo', 'Sem Título'))
         lista.mostrar_titulo = data.get('mostrar_titulo', True)
         lista.tipo_enumeracao = data.get('tipo_enumeracao', 'Híbrida (ABNT)')
+        lista.bin_name = data.get('bin_name', None) # <--- ADICIONADO
         if 'raiz' in data and data['raiz']:
             lista.raiz = ItemLista.from_dict(data['raiz'])
         return lista
@@ -217,7 +227,8 @@ class ListaABNT:
             "titulo": self.titulo,
             "mostrar_titulo": self.mostrar_titulo,
             "tipo_enumeracao": self.tipo_enumeracao,
-            "raiz": self.raiz.to_dict()
+            "raiz": self.raiz.to_dict(),
+            "bin_name": self.bin_name # <--- ADICIONADO
         }
 
 class Grafico:
@@ -229,6 +240,7 @@ class Grafico:
         self.caminho_dados_json: str = "" # Caminho para os dados de edição
         self.largura_cm: float = 12.0
         self.numero: int = 0
+        self.bin_name: str | None = None # <--- ADICIONADO
 
     @classmethod
     def from_dict(cls, data: dict) -> Grafico:
@@ -259,8 +271,20 @@ class DocumentoABNT:
         self.banco_figuras: list[Figura] = []
         self.banco_formulas: list[Formula] = []
         self.banco_listas: list[ListaABNT] = []
-        self.banco_graficos: list[Grafico] = [] # <--- ADICIONADO
+        self.banco_graficos: list[Grafico] = []
         self.referencias: list = []
+        
+        # --- INÍCIO DA MODIFICAÇÃO (v46) ---
+        # Armazena os nomes dos bins criados pelo usuário
+        self.banco_bins: dict[str, list[str]] = {
+            "tabelas": [],
+            "figuras": [],
+            "graficos": [],
+            "formulas": [],
+            "listas": [],
+        }
+        # --- FIM DA MODIFICAÇÃO (v46) ---
+
 
     def ordenar_referencias(self):
         """Ordena a lista de referências em ordem alfabética."""
@@ -294,8 +318,19 @@ class DocumentoABNT:
         doc.banco_figuras = [Figura.from_dict(d) for d in data.get('banco_figuras', [])]
         doc.banco_formulas = [Formula.from_dict(d) for d in data.get('banco_formulas', [])]
         doc.banco_listas = [ListaABNT.from_dict(d) for d in data.get('banco_listas', [])]
-        doc.banco_graficos = [Grafico.from_dict(d) for d in data.get('banco_graficos', [])] # <--- ADICIONADO
+        doc.banco_graficos = [Grafico.from_dict(d) for d in data.get('banco_graficos', [])]
         
+        # --- INÍCIO DA MODIFICAÇÃO (v46) ---
+        # Carrega os bins. Se não existir, usa um dict vazio
+        doc.banco_bins = data.get('banco_bins', {
+            "tabelas": [], "figuras": [], "graficos": [], "formulas": [], "listas": []
+        })
+        # Garante que todas as chaves existam, mesmo se for um projeto antigo
+        for key in ["tabelas", "figuras", "graficos", "formulas", "listas"]:
+            if key not in doc.banco_bins:
+                doc.banco_bins[key] = []
+        # --- FIM DA MODIFICAÇÃO (v46) ---
+
         doc.referencias = []
         try:
             from referencia import Livro, Artigo, Site
@@ -362,6 +397,7 @@ class DocumentoABNT:
             "banco_figuras": [figura.to_dict() for figura in self.banco_figuras],
             "banco_formulas": [formula.to_dict() for formula in self.banco_formulas],
             "banco_listas": [lista.to_dict() for lista in self.banco_listas],
-            "banco_graficos": [grafico.to_dict() for grafico in self.banco_graficos], # <--- ADICIONADO
+            "banco_graficos": [grafico.to_dict() for grafico in self.banco_graficos],
+            "banco_bins": self.banco_bins, # <--- ADICIONADO
             "referencias": referencias_serializadas
         }

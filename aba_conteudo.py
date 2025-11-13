@@ -1,13 +1,11 @@
 # aba_conteudo.py
 # Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
 #
-# ATUALIZAÇÃO (v45):
-# 1. Syntax Highlighting: Adicionada a classe 'MarcadorHighlighter'
-#    para colorir os marcadores ({{Figura:..}}, {{Grafico:..}}, etc.)
-#    dentro do editor de texto principal.
-# 2. Abas Compactas: Aplicado um stylesheet local ao QTabWidget
-#    dos "Bancos de Ativos" para reduzir o tamanho das abas
-#    e eliminar a barra de rolagem horizontal das abas.
+# ATUALIZAÇÃO (v53 - Correção de Typo):
+# 1. Corrigido typo de 'QAbstractaItemView' para
+#    'QAbstractItemView' na classe ArvoreConteudo.
+# 2. Mantém a lógica de validação de bins (v52) e
+#    numeração (v51).
 #
 
 import re
@@ -15,11 +13,11 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtWidgets import (QWidget, QLabel, QTextEdit, QPushButton, QListWidget, QCheckBox,
                                QVBoxLayout, QHBoxLayout, QMessageBox, QTreeWidget,
                                QTreeWidgetItem, QInputDialog, QAbstractItemView, QLineEdit, QTabWidget,
-                               QSplitter, QToolButton)
-# --- INÍCIO DAS MODIFICAÇÕES (v45) ---
+                               QSplitter, QToolButton, QMenu, QStyle,
+                               QGridLayout)
 from PySide6.QtGui import (QSyntaxHighlighter, QTextCharFormat, QColor, 
                            QFont)
-# --- FIM DAS MODIFICAÇÕES (v45) ---
+from PySide6.QtCore import Qt
 
 from documento import (Capitulo, Tabela, Figura, Formula, ListaABNT, 
                        Grafico)
@@ -27,12 +25,10 @@ from dialogo_tabela import TabelaDialog
 from dialogo_figura import DialogoFigura
 from dialogo_formula import DialogoFormula
 from dialogo_lista import ListaDialog
-from dialogo_chart import ChartDialog 
+from dialogo_chart import ChartDialog
 import os
 
-# --- INÍCIO DAS MODIFICAÇÕES (v45) ---
-# 1. CLASSE SYNTAX HIGHLIGHTER PARA MARCADORES
-# ---------------------------------------------------------------
+# --- CLASSE SYNTAX HIGHLIGHTER PARA MARCADORES ---
 
 class MarcadorHighlighter(QSyntaxHighlighter):
     """
@@ -42,61 +38,39 @@ class MarcadorHighlighter(QSyntaxHighlighter):
         super().__init__(parent)
         self.highlight_rules = []
         
-        # Regex para todos os marcadores.
-        # Grupo 1: Marcadores de Ativo (ex: {{Figura:Nome}})
-        #   Grupo 2: O tipo (Figura)
-        #   Grupo 3: O nome (Nome)
-        # Grupo 4: Marcadores de Comando (ex: {{QUEBRA_PAGINA}})
-        #   Grupo 5: O comando (QUEBRA_PAGINA)
         self.marker_regex = re.compile(
             r"(\{\{(Tabela|Figura|Grafico|Formula|Lista):([^}]+)\}\})|"
             r"(\{\{(QUEBRA_PAGINA|PAGINA_EM_BRANCO)\}\})"
         )
 
-        # Formatos de cor
         self.formats = {}
-        
-        # Cores base (podem ser personalizadas)
         base_colors = {
-            "Tabela": "#0078d4",  # Azul
-            "Figura": "#008a00",  # Verde
-            "Grafico": "#8a008a", # Roxo
-            "Formula": "#d13438", # Vermelho
-            "Lista": "#b45f06",   # Laranja
-            "QUEBRA_PAGINA": "#a0a0a0", # Cinza
-            "PAGINA_EM_BRANCO": "#a0a0a0", # Cinza
+            "Tabela": "#0078d4", "Figura": "#008a00", "Grafico": "#8a008a",
+            "Formula": "#d13438", "Lista": "#b45f06", "QUEBRA_PAGINA": "#a0a0a0",
+            "PAGINA_EM_BRANCO": "#a0a0a0",
         }
 
         for tipo, cor_hex in base_colors.items():
             format = QTextCharFormat()
             format.setForeground(QColor(cor_hex))
             format.setFontWeight(QFont.Weight.Bold)
-            # Adiciona um fundo sutil para destacar o marcador
             format.setBackground(QColor("#f0f0f0")) 
             self.formats[tipo] = format
 
     def highlightBlock(self, text):
         """Aplica a formatação ao bloco de texto atual."""
-        # Loop sobre todas as correspondências no bloco de texto
         for match in self.marker_regex.finditer(text):
-            
             if match.group(1): # É um marcador de ativo (ex: {{Figura:Nome}})
                 tipo = match.group(2) # O tipo (Figura)
                 if tipo in self.formats:
-                    # Aplica o formato ao grupo 1 (o marcador inteiro)
                     self.setFormat(match.start(1), match.end(1) - match.start(1), self.formats[tipo])
             
             elif match.group(4): # É um marcador de comando (ex: {{QUEBRA_PAGINA}})
                 tipo = match.group(5) # O tipo (QUEBRA_PAGINA)
                 if tipo in self.formats:
-                    # Aplica o formato ao grupo 4 (o marcador inteiro)
                     self.setFormat(match.start(4), match.end(4) - match.start(4), self.formats[tipo])
 
-# ---------------------------------------------------------------
-# --- FIM DAS MODIFICAÇÕES (v45) ---
-
-
-# --- CLASSE ADICIONAL PARA SOBRESCREVER O MENU DE CONTEXTO (CORRIGIDA) ---
+# --- CLASSE EDITOR DE CONTEÚDO ---
 class EditorConteudo(QTextEdit):
     """
     QTextEdit modificado para criar o menu de contexto padrão,
@@ -111,13 +85,15 @@ class EditorConteudo(QTextEdit):
         self.aba_conteudo_parent._adicionar_acoes_menu_contexto(menu)
         menu.exec(event.globalPos())
 
-# --- CLASSE ARVORE CONTEUDO ---
+# --- CLASSE ARVORE CONTEUDO (Capítulos) ---
 class ArvoreConteudo(QTreeWidget):
     estruturaAlterada = QtCore.Signal()
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+        # --- CORREÇÃO (v53) ---
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # --- FIM DA CORREÇÃO ---
         self.setDropIndicatorShown(True)
         
     def dropEvent(self, event: QtGui.QDropEvent):
@@ -127,6 +103,66 @@ class ArvoreConteudo(QTreeWidget):
         else:
             event.ignore()
 
+# --- CLASSE BinTreeWidget (Bancos de Ativos) ---
+class BinTreeWidget(QTreeWidget):
+    """
+    Subclasse de QTreeWidget que gerencia o drag-and-drop de
+    ativos (filhos) para dentro de "bins" (pastas/pais).
+    """
+    assetBinChanged = QtCore.Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setHeaderHidden(True) # Bins não precisam de cabeçalho
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setDropIndicatorShown(True)
+        self.setAcceptDrops(True)
+
+    def dropEvent(self, event: QtGui.QDropEvent):
+        """
+        Sobrescreve o dropEvent para atualizar o 'bin_name' do ativo.
+        """
+        item_arrastado = self.currentItem()
+        if not item_arrastado or not item_arrastado.parent():
+            event.ignore()
+            return
+
+        asset = item_arrastado.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if not asset:
+            event.ignore()
+            return
+
+        item_alvo = self.itemAt(event.position().toPoint())
+        
+        novo_bin_name = None
+        item_bin_alvo = None
+
+        if item_alvo is None:
+            # Soltou em espaço vazio, move para o bin "(Padrão)"
+            item_bin_alvo = self.findItems("(Padrão)", Qt.MatchFlag.MatchExactly)[0]
+        elif item_alvo.parent() is None:
+            # Soltou em um bin (item top-level)
+            item_bin_alvo = item_alvo
+        else:
+            # Soltou em outro ativo (item filho)
+            item_bin_alvo = item_alvo.parent()
+
+        if not item_bin_alvo:
+            event.ignore()
+            return
+            
+        nome_bin_alvo = item_bin_alvo.text(0)
+
+        # Atualiza o modelo de dados
+        if nome_bin_alvo == "(Padrão)":
+            asset.bin_name = None
+        else:
+            asset.bin_name = nome_bin_alvo
+
+        self.assetBinChanged.emit()
+        event.accept()
+
 # --- CLASSE ABA CONTEUDO ---
 class AbaConteudo(QWidget):
     topicoSelecionadoParaNavegacao = QtCore.Signal(str)
@@ -135,6 +171,26 @@ class AbaConteudo(QWidget):
         super().__init__(parent)
         self.documento = documento
         self._carregando_capitulo = False
+        
+        # --- INÍCIO DA MODIFICAÇÃO (Inline Bin-Editing) ---
+        # Roles customizadas para rastrear a edição de bins
+        # UserRole + 10: Flag para marcar se um bin é recém-criado
+        self.IS_NEW_BIN_ROLE = QtCore.Qt.ItemDataRole.UserRole + 10 
+        # UserRole + 11: Armazena o nome "antigo" antes da edição começar
+        self.OLD_NAME_ROLE = QtCore.Qt.ItemDataRole.UserRole + 11
+        
+        # Mapa para ligar as árvores de bin aos seus modelos de dados
+        self.bin_tree_map = {}
+        # (Este mapa será populado em _build_ui após as árvores serem criadas)
+        # --- FIM DA MODIFICAÇÃO ---
+        
+        # Fontes especiais para bins
+        self.bin_font = QFont()
+        self.bin_font.setBold(True)
+        self.default_bin_font = QFont()
+        self.default_bin_font.setItalic(True)
+        self.default_bin_brush = QColor("gray")
+
         self._build_ui()
         self._apply_styles()
 
@@ -171,6 +227,22 @@ class AbaConteudo(QWidget):
         
         left_splitter = QSplitter(QtCore.Qt.Orientation.Vertical)
         left_splitter.setMaximumWidth(350)
+
+        # --- INÍCIO DA MODIFICAÇÃO (v48) ---
+        # Adiciona estilo para a alça (handle) do splitter
+        left_splitter.setStyleSheet("""
+            QSplitter::handle:vertical {
+                background-color: #dcdcdc; /* Cor da borda */
+                height: 1px; /* Altura da barra */
+                border-top: 1px solid #c0c0c0;
+                border-bottom: 1px solid #c0c0c0;
+            }
+            QSplitter::handle:vertical:hover {
+                background-color: #0078d4; /* Cor primária */
+            }
+        """)
+        # --- FIM DA MODIFICAÇÃO (v48) ---
+
 
         # --- 1. PAINEL DO TOPO-ESQUERDO (Árvore de Capítulos) ---
         top_left_widget = QWidget()
@@ -216,16 +288,20 @@ class AbaConteudo(QWidget):
         
         # --- 2. PAINEL DA BASE-ESQUERDA (Bancos de Ativos) ---
         
-        self.lista_tabelas = QListWidget()
-        self.lista_figuras = QListWidget()
-        self.lista_formulas = QListWidget()
-        self.lista_listas = QListWidget() 
-        self.lista_graficos = QListWidget() 
+        self.arvore_tabelas = BinTreeWidget()
+        self.arvore_figuras = BinTreeWidget()
+        self.arvore_graficos = BinTreeWidget()
+        self.arvore_formulas = BinTreeWidget()
+        self.arvore_listas = BinTreeWidget()
+        
+        self.arvore_tabelas.assetBinChanged.connect(self.atualizar_bancos_visuais)
+        self.arvore_figuras.assetBinChanged.connect(self.atualizar_bancos_visuais)
+        self.arvore_graficos.assetBinChanged.connect(self.atualizar_bancos_visuais)
+        self.arvore_formulas.assetBinChanged.connect(self.atualizar_bancos_visuais)
+        self.arvore_listas.assetBinChanged.connect(self.atualizar_bancos_visuais)
 
         self.bancos_tabs = QTabWidget()
         
-        # --- INÍCIO DAS MODIFICAÇÕES (v45) ---
-        # 2. ESTILO DE ABAS COMPACTAS
         self.bancos_tabs.setObjectName("BancosAbas")
         self.bancos_tabs.setStyleSheet("""
             QTabWidget#BancosAbas QTabBar::tab {
@@ -233,83 +309,116 @@ class AbaConteudo(QWidget):
                 padding: 6px 8px;
             }
         """)
-        # --- FIM DAS MODIFICAÇÕES (v45) ---
+
+        # --- INÍCIO DA MODIFICAÇÃO (v47) ---
+        # Função auxiliar local para criar o layout do título do bin
+        def _criar_layout_titulo_bin(titulo: str, add_slot, del_slot) -> QHBoxLayout:
+            titulo_layout = QHBoxLayout()
+            titulo_layout.addWidget(QLabel(titulo))
+            titulo_layout.addStretch()
+            
+            btn_add_bin = QToolButton()
+            btn_add_bin.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+            btn_add_bin.setToolTip("Criar novo bin (pasta)")
+            btn_add_bin.clicked.connect(add_slot)
+            titulo_layout.addWidget(btn_add_bin)
+            
+            btn_del_bin = QToolButton()
+            btn_del_bin.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+            btn_del_bin.setToolTip("Remover bin selecionado")
+            btn_del_bin.setProperty("cssClass", "destructive") # Para estilo
+            btn_del_bin.clicked.connect(del_slot)
+            titulo_layout.addWidget(btn_del_bin)
+            return titulo_layout
+        # --- FIM DA MODIFICAÇÃO (v47) ---
 
 
-        # Cria o widget para a aba "Tabelas"
+        # --- Aba Tabelas ---
         tabelas_widget = QWidget()
         tabelas_v_layout = QVBoxLayout(tabelas_widget)
-        tabelas_v_layout.addWidget(QLabel("Banco de Tabelas do Projeto:"))
+        tabelas_titulo_layout = _criar_layout_titulo_bin(
+            "Banco de Tabelas:",
+            lambda: self._adicionar_bin(self.arvore_tabelas, "tabelas"),
+            lambda: self._remover_bin(self.arvore_tabelas, "tabelas", self.documento.banco_tabelas)
+        )
+        tabelas_v_layout.addLayout(tabelas_titulo_layout)
         self.filtro_tabelas_check = QCheckBox("Mostrar apenas do tópico atual")
         self.filtro_tabelas_check.stateChanged.connect(self.atualizar_bancos_visuais)
         tabelas_v_layout.addWidget(self.filtro_tabelas_check)
-        tabelas_v_layout.addWidget(self.lista_tabelas)
+        tabelas_v_layout.addWidget(self.arvore_tabelas) 
+        
         tabelas_btn_layout = QHBoxLayout()
         btn_add_tabela = QPushButton("Criar")
         btn_edit_tabela = QPushButton("Editar")
         btn_del_tabela = QPushButton("Remover")
-        
         btn_edit_tabela.setProperty("cssClass", "utility")
         btn_del_tabela.setProperty("cssClass", "destructive")
-        
         tabelas_btn_layout.addWidget(btn_add_tabela)
         tabelas_btn_layout.addWidget(btn_edit_tabela)
         tabelas_btn_layout.addWidget(btn_del_tabela)
         tabelas_v_layout.addLayout(tabelas_btn_layout)
+        
         btn_ins_tabela = QPushButton("Inserir no Texto")
         tabelas_v_layout.addWidget(btn_ins_tabela)
         
         btn_add_tabela.clicked.connect(self._adicionar_tabela)
         btn_edit_tabela.clicked.connect(self._editar_tabela)
         btn_del_tabela.clicked.connect(self._remover_tabela)
-        btn_ins_tabela.clicked.connect(lambda: self._inserir_marcador_generico("Tabela", self.lista_tabelas.currentItem().text()) if self.lista_tabelas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma tabela do banco para inserir."))
+        btn_ins_tabela.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_tabelas, "Tabela"))
         
-        # Cria o widget para a aba "Figuras"
+        # --- Aba Figuras ---
         figuras_widget = QWidget()
         figuras_v_layout = QVBoxLayout(figuras_widget)
-        figuras_v_layout.addWidget(QLabel("Banco de Figuras do Projeto:"))
+        figuras_titulo_layout = _criar_layout_titulo_bin(
+            "Banco de Figuras:",
+            lambda: self._adicionar_bin(self.arvore_figuras, "figuras"),
+            lambda: self._remover_bin(self.arvore_figuras, "figuras", self.documento.banco_figuras)
+        )
+        figuras_v_layout.addLayout(figuras_titulo_layout)
         self.filtro_figuras_check = QCheckBox("Mostrar apenas do tópico atual")
         self.filtro_figuras_check.stateChanged.connect(self.atualizar_bancos_visuais)
         figuras_v_layout.addWidget(self.filtro_figuras_check)
-        figuras_v_layout.addWidget(self.lista_figuras)
+        figuras_v_layout.addWidget(self.arvore_figuras)
+        
         figuras_btn_layout = QHBoxLayout()
         btn_add_figura = QPushButton("Criar")
         btn_edit_figura = QPushButton("Editar")
         btn_del_figura = QPushButton("Remover")
-
         btn_edit_figura.setProperty("cssClass", "utility")
         btn_del_figura.setProperty("cssClass", "destructive")
-        
         figuras_btn_layout.addWidget(btn_add_figura)
         figuras_btn_layout.addWidget(btn_edit_figura)
         figuras_btn_layout.addWidget(btn_del_figura)
         figuras_v_layout.addLayout(figuras_btn_layout)
+        
         btn_ins_figura = QPushButton("Inserir no Texto")
         figuras_v_layout.addWidget(btn_ins_figura)
         
         btn_add_figura.clicked.connect(self._adicionar_figura)
         btn_edit_figura.clicked.connect(self._editar_figura)
         btn_del_figura.clicked.connect(self._remover_figura)
-        btn_ins_figura.clicked.connect(lambda: self._inserir_marcador_generico("Figura", self.lista_figuras.currentItem().text()) if self.lista_figuras.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma figura do banco para inserir."))
+        btn_ins_figura.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_figuras, "Figura"))
 
-        # Cria o widget para a aba "Gráficos"
+        # --- Aba Gráficos ---
         graficos_widget = QWidget()
         graficos_v_layout = QVBoxLayout(graficos_widget)
-        graficos_v_layout.addWidget(QLabel("Banco de Gráficos do Projeto:"))
-        
+        graficos_titulo_layout = _criar_layout_titulo_bin(
+            "Banco de Gráficos:",
+            lambda: self._adicionar_bin(self.arvore_graficos, "graficos"),
+            lambda: self._remover_bin(self.arvore_graficos, "graficos", self.documento.banco_graficos)
+        )
+        graficos_v_layout.addLayout(graficos_titulo_layout)
         self.filtro_graficos_check = QCheckBox("Mostrar apenas do tópico atual")
         self.filtro_graficos_check.stateChanged.connect(self.atualizar_bancos_visuais)
         graficos_v_layout.addWidget(self.filtro_graficos_check)
-        graficos_v_layout.addWidget(self.lista_graficos)
+        graficos_v_layout.addWidget(self.arvore_graficos)
         
         graficos_btn_layout = QHBoxLayout()
         btn_add_grafico = QPushButton("Criar")
         btn_edit_grafico = QPushButton("Editar")
         btn_del_grafico = QPushButton("Remover")
-
         btn_edit_grafico.setProperty("cssClass", "utility")
         btn_del_grafico.setProperty("cssClass", "destructive")
-        
         graficos_btn_layout.addWidget(btn_add_grafico)
         graficos_btn_layout.addWidget(btn_edit_grafico)
         graficos_btn_layout.addWidget(btn_del_grafico)
@@ -321,54 +430,61 @@ class AbaConteudo(QWidget):
         btn_add_grafico.clicked.connect(self._adicionar_grafico)
         btn_edit_grafico.clicked.connect(self._editar_grafico)
         btn_del_grafico.clicked.connect(self._remover_grafico)
-        btn_ins_grafico.clicked.connect(lambda: self._inserir_marcador_generico("Grafico", self.lista_graficos.currentItem().text()) if self.lista_graficos.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione um gráfico do banco para inserir."))
+        btn_ins_grafico.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_graficos, "Grafico"))
 
-        # Cria o widget para a aba "Fórmulas"
+        # --- Aba Fórmulas ---
         formulas_widget = QWidget()
         formulas_v_layout = QVBoxLayout(formulas_widget)
-        formulas_v_layout.addWidget(QLabel("Banco de Fórmulas do Projeto:"))
+        formulas_titulo_layout = _criar_layout_titulo_bin(
+            "Banco de Fórmulas:",
+            lambda: self._adicionar_bin(self.arvore_formulas, "formulas"),
+            lambda: self._remover_bin(self.arvore_formulas, "formulas", self.documento.banco_formulas)
+        )
+        formulas_v_layout.addLayout(formulas_titulo_layout)
         self.filtro_formulas_check = QCheckBox("Mostrar apenas do tópico atual")
         self.filtro_formulas_check.stateChanged.connect(self.atualizar_bancos_visuais)
         formulas_v_layout.addWidget(self.filtro_formulas_check)
-        formulas_v_layout.addWidget(self.lista_formulas)
+        formulas_v_layout.addWidget(self.arvore_formulas)
+        
         formulas_btn_layout = QHBoxLayout()
         btn_add_formula = QPushButton("Criar")
         btn_edit_formula = QPushButton("Editar")
         btn_del_formula = QPushButton("Remover")
-
         btn_edit_formula.setProperty("cssClass", "utility")
         btn_del_formula.setProperty("cssClass", "destructive")
-        
         formulas_btn_layout.addWidget(btn_add_formula)
         formulas_btn_layout.addWidget(btn_edit_formula)
         formulas_btn_layout.addWidget(btn_del_formula)
         formulas_v_layout.addLayout(formulas_btn_layout)
+        
         btn_ins_formula = QPushButton("Inserir no Texto")
         formulas_v_layout.addWidget(btn_ins_formula)
         
         btn_add_formula.clicked.connect(self._adicionar_formula)
         btn_edit_formula.clicked.connect(self._editar_formula)
         btn_del_formula.clicked.connect(self._remover_formula)
-        btn_ins_formula.clicked.connect(lambda: self._inserir_marcador_generico("Formula", self.lista_formulas.currentItem().text()) if self.lista_formulas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma fórmula do banco para inserir."))
+        btn_ins_formula.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_formulas, "Formula"))
         
-        # Cria o widget para a aba "Listas"
+        # --- Aba Listas ---
         listas_widget = QWidget()
         listas_v_layout = QVBoxLayout(listas_widget)
-        listas_v_layout.addWidget(QLabel("Banco de Listas do Projeto:"))
-        
+        listas_titulo_layout = _criar_layout_titulo_bin(
+            "Banco de Listas:",
+            lambda: self._adicionar_bin(self.arvore_listas, "listas"),
+            lambda: self._remover_bin(self.arvore_listas, "listas", self.documento.banco_listas)
+        )
+        listas_v_layout.addLayout(listas_titulo_layout)
         self.filtro_listas_check = QCheckBox("Mostrar apenas do tópico atual")
         self.filtro_listas_check.stateChanged.connect(self.atualizar_bancos_visuais)
         listas_v_layout.addWidget(self.filtro_listas_check)
-        listas_v_layout.addWidget(self.lista_listas)
+        listas_v_layout.addWidget(self.arvore_listas)
         
         listas_btn_layout = QHBoxLayout()
         btn_add_lista = QPushButton("Criar")
         btn_edit_lista = QPushButton("Editar")
         btn_del_lista = QPushButton("Remover")
-
         btn_edit_lista.setProperty("cssClass", "utility")
         btn_del_lista.setProperty("cssClass", "destructive")
-        
         listas_btn_layout.addWidget(btn_add_lista)
         listas_btn_layout.addWidget(btn_edit_lista)
         listas_btn_layout.addWidget(btn_del_lista)
@@ -380,7 +496,7 @@ class AbaConteudo(QWidget):
         btn_add_lista.clicked.connect(self._adicionar_lista)
         btn_edit_lista.clicked.connect(self._editar_lista)
         btn_del_lista.clicked.connect(self._remover_lista)
-        btn_ins_lista.clicked.connect(lambda: self._inserir_marcador_generico("Lista", self.lista_listas.currentItem().text()) if self.lista_listas.currentItem() else QMessageBox.warning(self, "Atenção", "Selecione uma lista do banco para inserir."))
+        btn_ins_lista.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_listas, "Lista"))
         
         # Adiciona os widgets criados como abas no QTabWidget
         self.bancos_tabs.addTab(tabelas_widget, "Tabelas")
@@ -390,7 +506,7 @@ class AbaConteudo(QWidget):
         self.bancos_tabs.addTab(listas_widget, "Listas") 
 
         left_splitter.addWidget(self.bancos_tabs)
-        left_splitter.setSizes([400, 300]) 
+        
         layout.addWidget(left_splitter)
 
         # --- 3. PAINEL DIREITO (Editor de Texto) ---
@@ -432,10 +548,7 @@ class AbaConteudo(QWidget):
         self.editor_capitulo = EditorConteudo(aba_conteudo_parent=self) 
         self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
 
-        # --- INÍCIO DAS MODIFICAÇÕES (v45) ---
-        # 3. APLICAR O SYNTAX HIGHLIGHTER
         self.highlighter = MarcadorHighlighter(self.editor_capitulo.document())
-        # --- FIM DAS MODIFICAÇÕES (v45) ---
 
         self.btn_desfazer.clicked.connect(self.editor_capitulo.undo)
         self.btn_refazer.clicked.connect(self.editor_capitulo.redo)
@@ -449,14 +562,29 @@ class AbaConteudo(QWidget):
         
         layout.addWidget(right_panel, 1) 
         
+        # --- INÍCIO DA MODIFICAÇÃO (Inline Bin-Editing) ---
+        # Popula o mapa de árvores e conecta os sinais de edição
+        self.bin_tree_map = {
+            self.arvore_tabelas: ("tabelas", self.documento.banco_tabelas),
+            self.arvore_figuras: ("figuras", self.documento.banco_figuras),
+            self.arvore_graficos: ("graficos", self.documento.banco_graficos),
+            self.arvore_formulas: ("formulas", self.documento.banco_formulas),
+            self.arvore_listas: ("listas", self.documento.banco_listas),
+        }
+        
+        for tree in self.bin_tree_map.keys():
+            # Conecta o handler que processa a mudança de nome
+            tree.itemChanged.connect(self._on_bin_item_changed)
+        # --- FIM DA MODIFICAÇÃO ---
+        
         self._popular_arvore()
         if self.arvore_capitulos.topLevelItemCount() > 0:
             self.arvore_capitulos.setCurrentItem(self.arvore_capitulos.topLevelItem(0))
 
     # --- MÉTODOS DE MENU DE CONTEXTO (MODIFICADOS) ---
 
-    @QtCore.Slot(QtWidgets.QMenu)
-    def _adicionar_acoes_menu_contexto(self, menu: QtWidgets.QMenu): # Aceita o menu nativo
+    @QtCore.Slot(QMenu)
+    def _adicionar_acoes_menu_contexto(self, menu: QMenu): # Aceita o menu nativo
         menu.addSeparator() 
 
         menu_tabelas = menu.addMenu("Inserir Tabela")
@@ -505,7 +633,7 @@ class AbaConteudo(QWidget):
         )
 
 
-    def _adicionar_submenus_banco(self, menu: QtWidgets.QMenu, banco: list, tipo: str, inserir_slot, criar_slot):
+    def _adicionar_submenus_banco(self, menu: QMenu, banco: list, tipo: str, inserir_slot, criar_slot):
         acao_novo = menu.addAction(f"Criar Nova {tipo}...")
         acao_novo.triggered.connect(criar_slot)
         
@@ -524,53 +652,111 @@ class AbaConteudo(QWidget):
 
     # --- FIM DOS MÉTODOS DE MENU DE CONTEXTO ---
 
+    # --- INÍCIO DA MODIFICAÇÃO (v46) ---
+    # Método genérico para popular uma BinTreeWidget
+    def _popular_arvore_bin(self, tree_widget: BinTreeWidget, lista_ativos: list, filtro_check: QCheckBox, conteudo_capitulo: str, tipo_marcador: str, bin_key: str):
+        """
+        Popula uma BinTreeWidget, organizando os ativos em bins.
+        Aplica o filtro de "tópico atual" se estiver ativo.
+        """
+        tree_widget.blockSignals(True)
+        tree_widget.clear()
+
+        # 1. Obter o conjunto de ativos usados neste tópico, se o filtro estiver ativo
+        titulos_usados = set()
+        filtrar_topico = filtro_check.isChecked() and conteudo_capitulo
+        if filtrar_topico:
+            titulos_usados = set(re.findall(r"\{\{" + tipo_marcador + r":([^}]+)\}\}", conteudo_capitulo))
+
+        # 2. Criar os Bins
+        bins_existentes = {} # Mapeia nome do bin -> QTreeWidgetItem
+        
+        # Bin Padrão (sempre existe)
+        bin_padrao = QTreeWidgetItem(tree_widget, ["(Padrão)"])
+        bin_padrao.setFont(0, self.default_bin_font)
+        bin_padrao.setForeground(0, self.default_bin_brush)
+        bin_padrao.setToolTip(0, "Itens que não estão em um bin")
+        bin_padrao.setFlags(bin_padrao.flags() & ~Qt.ItemFlag.ItemIsEditable & ~Qt.ItemFlag.ItemIsDropEnabled & ~Qt.ItemFlag.ItemIsDragEnabled) # Não pode ser editado, alvo ou arrastado
+        bins_existentes["(Padrão)"] = bin_padrao
+        
+        # Bins do Usuário
+        for nome_bin in sorted(self.documento.banco_bins.get(bin_key, [])):
+            item_bin = QTreeWidgetItem(tree_widget, [nome_bin])
+            item_bin.setFont(0, self.bin_font)
+            item_bin.setFlags(item_bin.flags() & ~Qt.ItemFlag.ItemIsDragEnabled) # Bins não podem ser arrastados
+            
+            # --- INÍCIO DA MODIFICAÇÃO (Inline Bin-Editing) ---
+            # Permite que bins existentes sejam renomeados
+            item_bin.setFlags(item_bin.flags() | Qt.ItemFlag.ItemIsEditable) 
+            # Armazena o nome atual para lógica de renomeação
+            item_bin.setData(0, self.OLD_NAME_ROLE, nome_bin) 
+            # --- FIM DA MODIFICAÇÃO ---
+            
+            item_bin.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+            bins_existentes[nome_bin] = item_bin
+            
+        # 3. Adicionar Ativos aos Bins
+        for ativo in lista_ativos:
+            nome_ativo = getattr(ativo, 'titulo', None) or getattr(ativo, 'legenda', None)
+            if not nome_ativo:
+                continue
+
+            # Aplica filtro de tópico
+            if filtrar_topico and nome_ativo not in titulos_usados:
+                continue
+
+            # Encontra o bin pai
+            nome_bin = ativo.bin_name
+            if nome_bin and nome_bin in bins_existentes:
+                item_bin_pai = bins_existentes[nome_bin]
+            else:
+                item_bin_pai = bin_padrao # Padrão
+
+            # Cria o item do ativo
+            item_ativo = QTreeWidgetItem(item_bin_pai, [nome_ativo])
+            item_ativo.setData(0, QtCore.Qt.ItemDataRole.UserRole, ativo) # Armazena o objeto
+            item_ativo.setFlags(item_ativo.flags() & ~Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsDragEnabled) # Ativos podem ser arrastados
+            
+        tree_widget.expandAll()
+        tree_widget.blockSignals(False)
+    
     @QtCore.Slot()
     def atualizar_bancos_visuais(self):
+        """
+        Atualiza TODOS os bancos de ativos (árvores),
+        respeitando os filtros de tópico e os bins.
+        """
         capitulo_selecionado = self._get_capitulo_selecionado()
         conteudo_capitulo = capitulo_selecionado.conteudo if capitulo_selecionado else ""
-        
-        self.lista_tabelas.clear()
-        if self.filtro_tabelas_check.isChecked() and capitulo_selecionado:
-            titulos_usados = set(re.findall(r"\{\{Tabela:([^}]+)\}\}", conteudo_capitulo))
-            for tabela in self.documento.banco_tabelas:
-                if tabela.titulo in titulos_usados: self.lista_tabelas.addItem(tabela.titulo)
-        else:
-            for tabela in self.documento.banco_tabelas: self.lista_tabelas.addItem(tabela.titulo)
 
-        self.lista_figuras.clear()
-        if self.filtro_figuras_check.isChecked() and capitulo_selecionado:
-            titulos_usados = set(re.findall(r"\{\{Figura:([^}]+)\}\}", conteudo_capitulo))
-            for figura in self.documento.banco_figuras:
-                if figura.titulo in titulos_usados: self.lista_figuras.addItem(figura.titulo)
-        else:
-            for figura in self.documento.banco_figuras: self.lista_figuras.addItem(figura.titulo)
-            
-        self.lista_graficos.clear()
-        if self.filtro_graficos_check.isChecked() and capitulo_selecionado:
-            titulos_usados = set(re.findall(r"\{\{Grafico:([^}]+)\}\}", conteudo_capitulo))
-            for grafico in self.documento.banco_graficos:
-                if grafico.titulo in titulos_usados: self.lista_graficos.addItem(grafico.titulo)
-        else:
-            for grafico in self.documento.banco_graficos: self.lista_graficos.addItem(grafico.titulo)
-
-        self.lista_formulas.clear()
-        if self.filtro_formulas_check.isChecked() and capitulo_selecionado:
-            legendas_usadas = set(re.findall(r"\{\{Formula:([^}]+)\}\}", conteudo_capitulo))
-            for formula in self.documento.banco_formulas:
-                if formula.legenda in legendas_usadas:
-                    self.lista_formulas.addItem(formula.legenda)
-        else:
-            for formula in self.documento.banco_formulas:
-                self.lista_formulas.addItem(formula.legenda)
+        # Popula Tabelas
+        self._popular_arvore_bin(self.arvore_tabelas, self.documento.banco_tabelas, 
+                                 self.filtro_tabelas_check, conteudo_capitulo, 
+                                 "Tabela", "tabelas")
         
-        self.lista_listas.clear()
-        if self.filtro_listas_check.isChecked() and capitulo_selecionado:
-            titulos_usados = set(re.findall(r"\{\{Lista:([^}]+)\}\}", conteudo_capitulo))
-            for lista in self.documento.banco_listas:
-                if lista.titulo in titulos_usados: self.lista_listas.addItem(lista.titulo)
-        else:
-            for lista in self.documento.banco_listas: self.lista_listas.addItem(lista.titulo)
+        # Popula Figuras
+        self._popular_arvore_bin(self.arvore_figuras, self.documento.banco_figuras, 
+                                 self.filtro_figuras_check, conteudo_capitulo, 
+                                 "Figura", "figuras")
+                                 
+        # Popula Gráficos
+        self._popular_arvore_bin(self.arvore_graficos, self.documento.banco_graficos, 
+                                 self.filtro_graficos_check, conteudo_capitulo, 
+                                 "Grafico", "graficos")
+        
+        # Popula Fórmulas
+        self._popular_arvore_bin(self.arvore_formulas, self.documento.banco_formulas, 
+                                 self.filtro_formulas_check, conteudo_capitulo, 
+                                 "Formula", "formulas")
+
+        # Popula Listas
+        self._popular_arvore_bin(self.arvore_listas, self.documento.banco_listas, 
+                                 self.filtro_listas_check, conteudo_capitulo, 
+                                 "Lista", "listas")
     
+    # --- FIM DA MODIFICAÇÃO (v46) ---
+
+
     @QtCore.Slot()
     def _inserir_quebra_pagina(self):
         self.editor_capitulo.insertPlainText("\n{{QUEBRA_PAGINA}}\n")
@@ -678,11 +864,259 @@ class AbaConteudo(QWidget):
         self.editor_capitulo.setEnabled(True)
         self._carregando_capitulo = False
 
+    # --- INÍCIO DA MODIFICAÇÃO (v52) ---
+    # Métodos genéricos para gerenciamento de Bins
+    
+    def _adicionar_bin(self, tree_widget: QTreeWidget, bin_key: str):
+        """
+        Adiciona um novo item de bin na árvore e o coloca
+        imediatamente em modo de edição (estilo Windows).
+        """
+        # --- Lógica de numeração (v51) ---
+        base_name = "Novo Bin"
+        temp_name = base_name
+        
+        # 1. Verifica se "Novo Bin" (sem número) existe
+        if tree_widget.findItems(temp_name, Qt.MatchFlag.MatchExactly):
+            # Se existe, começa a procurar por "Novo Bin 2"
+            i = 2
+            while True:
+                temp_name = f"{base_name} {i}"
+                if not tree_widget.findItems(temp_name, Qt.MatchFlag.MatchExactly):
+                    # Encontrou um nome vago
+                    break
+                i += 1
+        # Se "Novo Bin" não existia, temp_name já é "Novo Bin"
+        # --- Fim da lógica de numeração ---
+
+        # Bloqueia sinais para evitar 'itemChanged' prematuro
+        tree_widget.blockSignals(True)
+
+        # Cria o item na UI
+        item_bin = QTreeWidgetItem(tree_widget, [temp_name])
+        item_bin.setFont(0, self.bin_font)
+        item_bin.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+        
+        # Define as flags (editável, mas não arrastável)
+        flags = (Qt.ItemFlag.ItemIsSelectable | 
+                 Qt.ItemFlag.ItemIsUserCheckable | 
+                 Qt.ItemFlag.ItemIsEnabled | 
+                 Qt.ItemFlag.ItemIsDropEnabled | 
+                 Qt.ItemFlag.ItemIsEditable)
+        item_bin.setFlags(flags)
+        
+        # Armazena os dados temporários no item
+        item_bin.setData(0, self.IS_NEW_BIN_ROLE, True) # Marca como "novo"
+        item_bin.setData(0, self.OLD_NAME_ROLE, temp_name) # Armazena nome
+        
+        # Desbloqueia os sinais
+        tree_widget.blockSignals(False)
+        
+        # Garante foco e inicia a edição
+        tree_widget.setFocus()
+        tree_widget.setCurrentItem(item_bin)
+        tree_widget.editItem(item_bin, 0) # Inicia a edição
+
+    @QtCore.Slot(QTreeWidgetItem, int)
+    def _on_bin_item_changed(self, item: QTreeWidgetItem, column: int):
+        """
+        Handler chamado QUANDO a edição de um item de bin (novo ou existente)
+        é concluída.
+        """
+        # Ignora se não for a coluna 0 ou se for um item filho (um ativo)
+        if column != 0 or item.parent():
+            return
+            
+        tree_widget = item.treeWidget()
+        if not tree_widget or tree_widget not in self.bin_tree_map:
+            return
+
+        # 1. Obter dados de contexto
+        bin_key, banco_de_ativos = self.bin_tree_map[tree_widget]
+        lista_bins_modelo = self.documento.banco_bins.get(bin_key, [])
+        
+        new_name = item.text(0).strip()
+        is_new = item.data(0, self.IS_NEW_BIN_ROLE) or False
+        old_name = item.data(0, self.OLD_NAME_ROLE)
+
+        # 2. Lógica de Validação e Cancelamento
+        
+        # CASO A: Usuário cancelou a criação (pressionou Esc)
+        # O QLineEdit reverte o texto para o old_name
+        if new_name == old_name and is_new:
+            tree_widget.blockSignals(True)
+            tree_widget.takeTopLevelItem(tree_widget.indexOfTopLevelItem(item))
+            tree_widget.blockSignals(False)
+            return
+        
+        # CASO B: Nome ficou vazio (usuário apagou e deu Enter)
+        if not new_name:
+            tree_widget.blockSignals(True) 
+            QMessageBox.warning(self, "Nome Inválido", "O nome do bin não pode ficar vazio.")
+            # CORREÇÃO (v52): Sempre reverter, nunca deletar
+            item.setText(0, old_name) 
+            tree_widget.blockSignals(False) 
+            return
+            
+        # CASO C: Nome reservado
+        if new_name == "(Padrão)":
+            tree_widget.blockSignals(True)
+            QMessageBox.warning(self, "Nome Inválido", "Este nome é reservado.")
+            # CORREÇÃO (v52): Sempre reverter, nunca deletar
+            item.setText(0, old_name)
+            tree_widget.blockSignals(False)
+            return
+
+        # CASO D: Nome duplicado
+        # (Procura na lista de bins do modelo, ignorando o nome antigo)
+        outros_nomes = [b.lower() for b in lista_bins_modelo if b.lower() != (old_name.lower() if old_name else None)]
+        if new_name.lower() in outros_nomes:
+            tree_widget.blockSignals(True)
+            QMessageBox.warning(self, "Nome Duplicado", "Já existe um bin com este nome.")
+            # CORREÇÃO (v52): Sempre reverter, nunca deletar
+            item.setText(0, old_name)
+            tree_widget.blockSignals(False)
+            return
+
+        # 3. Salvar no Modelo de Dados (Nome é válido)
+        
+        tree_widget.blockSignals(True)
+        
+        if is_new:
+            # É um bin novo, apenas adiciona ao modelo
+            lista_bins_modelo.append(new_name)
+            self.documento.banco_bins[bin_key] = lista_bins_modelo
+            # Remove a flag de "novo"
+            item.setData(0, self.IS_NEW_BIN_ROLE, None) 
+        
+        else:
+            # É uma renomeação de um bin existente
+            # (Verifica se old_name está no modelo - pode não estar se a 
+            #  edição anterior falhou, mas o old_name_role foi atualizado)
+            if old_name in lista_bins_modelo:
+                lista_bins_modelo.remove(old_name)
+            
+            lista_bins_modelo.append(new_name)
+            self.documento.banco_bins[bin_key] = lista_bins_modelo
+            
+            # Atualiza todos os ativos que usavam o nome antigo
+            for ativo in banco_de_ativos:
+                if getattr(ativo, 'bin_name', None) == old_name:
+                    ativo.bin_name = new_name
+            
+        # Atualiza o "nome antigo" para a próxima renomeação
+        item.setData(0, self.OLD_NAME_ROLE, new_name)
+        
+        tree_widget.blockSignals(False)
+
+    # --- FIM DA MODIFICAÇÃO (v52) ---
+
+
+    def _remover_bin(self, tree_widget: BinTreeWidget, bin_key: str, banco_ativos: list):
+        """Remove um bin, movendo todos os seus ativos para o bin (Padrão)."""
+        item_selecionado = tree_widget.currentItem()
+        if not item_selecionado or item_selecionado.parent():
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione um bin (pasta) para remover.")
+            return
+            
+        nome_bin = item_selecionado.text(0)
+        
+        # Proteção contra remoção de um item recém-criado
+        if item_selecionado.data(0, self.IS_NEW_BIN_ROLE):
+            tree_widget.takeTopLevelItem(tree_widget.indexOfTopLevelItem(item_selecionado))
+            return
+            
+        if nome_bin == "(Padrão)":
+            QMessageBox.warning(self, "Ação Inválida", "Não é possível remover o bin Padrão.")
+            return
+            
+        resposta = QMessageBox.question(self, "Confirmar Remoção",
+            f"Tem certeza que deseja remover o bin '{nome_bin}'?\n\n"
+            f"Todos os itens dentro dele serão movidos para o bin '(Padrão)'.")
+            
+        if resposta == QMessageBox.StandardButton.Yes:
+            # Remove do modelo de dados
+            if nome_bin in self.documento.banco_bins.get(bin_key, []):
+                self.documento.banco_bins[bin_key].remove(nome_bin)
+                
+            # Atualiza o bin_name de todos os ativos órfãos
+            for ativo in banco_ativos:
+                if getattr(ativo, 'bin_name', None) == nome_bin:
+                    ativo.bin_name = None
+                        
+            # Redesenha todas as árvores (mais fácil do que mover os itens na UI)
+            self.atualizar_bancos_visuais()
+
+    def _get_item_selecionado(self, tree_widget: QTreeWidget) -> tuple[QTreeWidgetItem | None, object | None]:
+        """
+        Retorna o item e o objeto de dados (ativo) selecionado.
+        Retorna (None, None) se um bin ou nada for selecionado.
+        """
+        item = tree_widget.currentItem()
+        if not item or not item.parent():
+            # Nenhum item selecionado, ou o item é um bin (não tem pai)
+            return None, None
+            
+        asset = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        return item, asset
+        
+    def _get_bin_alvo(self, tree_widget: QTreeWidget) -> tuple[QTreeWidgetItem, str | None]:
+        """
+        Descobre em qual bin um novo ativo deve ser criado.
+        Retorna (item_do_bin_widget, nome_do_bin_string).
+        """
+        item_selecionado = tree_widget.currentItem()
+        item_bin_alvo = None
+        
+        if item_selecionado:
+            if item_selecionado.parent() is None: # É um bin
+                item_bin_alvo = item_selecionado
+            else: # É um ativo
+                item_bin_alvo = item_selecionado.parent()
+        
+        if not item_bin_alvo:
+            # Nada selecionado, encontra o bin "(Padrão)"
+            padrao_itens = tree_widget.findItems("(Padrão)", Qt.MatchFlag.MatchExactly)
+            if padrao_itens:
+                item_bin_alvo = padrao_itens[0]
+            else:
+                # Fallback de segurança (nunca deve acontecer)
+                item_bin_alvo = tree_widget.invisibleRootItem()
+        
+        nome_bin = item_bin_alvo.text(0)
+        
+        # Proteção contra adição em um bin recém-criado e ainda não salvo
+        if item_bin_alvo.data(0, self.IS_NEW_BIN_ROLE):
+            item_bin_alvo = tree_widget.findItems("(Padrão)", Qt.MatchFlag.MatchExactly)[0]
+            nome_bin = "(Padrão)"
+
+        if nome_bin == "(Padrão)":
+            return item_bin_alvo, None
+        return item_bin_alvo, nome_bin
+
+    def _inserir_marcador_selecionado(self, tree_widget: QTreeWidget, tipo_marcador: str):
+        """Insere o marcador do ativo selecionado no editor."""
+        item, asset = self._get_item_selecionado(tree_widget)
+        if not asset:
+            QMessageBox.warning(self, "Atenção", "Por favor, selecione um item (não um bin) para inserir.")
+            return
+            
+        nome_ativo = getattr(asset, 'titulo', None) or getattr(asset, 'legenda', None)
+        if nome_ativo:
+            self._inserir_marcador_generico(tipo_marcador, nome_ativo)
+
+    # --- FIM DA MODIFICAÇÃO (v46) ---
+
+
     @QtCore.Slot()
     def _adicionar_tabela(self):
         dialog = TabelaDialog(banco_tabelas=self.documento.banco_tabelas, parent=self)
         if dialog.exec():
             nova_tabela = dialog.get_dados_tabela()
+            
+            item_bin, nome_bin = self._get_bin_alvo(self.arvore_tabelas)
+            nova_tabela.bin_name = nome_bin
+            
             self.documento.banco_tabelas.append(nova_tabela)
             self.atualizar_bancos_visuais()
             if nova_tabela.titulo:
@@ -691,10 +1125,13 @@ class AbaConteudo(QWidget):
     @QtCore.Slot()
     def _adicionar_figura(self):
         dialog = DialogoFigura(banco_figuras=self.documento.banco_figuras, parent=self)
-        
         if dialog.exec():
             nova_figura = dialog.get_dados_figura()
             if nova_figura and nova_figura.caminho_processado:
+                
+                item_bin, nome_bin = self._get_bin_alvo(self.arvore_figuras)
+                nova_figura.bin_name = nome_bin
+                
                 self.documento.banco_figuras.append(nova_figura)
                 self.atualizar_bancos_visuais()
                 if nova_figura.titulo:
@@ -705,71 +1142,102 @@ class AbaConteudo(QWidget):
         dialog = DialogoFormula(banco_formulas=self.documento.banco_formulas, parent=self)
         if dialog.exec():
             nova_formula = dialog.get_dados_formula()
+            
+            item_bin, nome_bin = self._get_bin_alvo(self.arvore_formulas)
+            nova_formula.bin_name = nome_bin
+            
             self.documento.banco_formulas.append(nova_formula)
             self.atualizar_bancos_visuais()
             if nova_formula.legenda:
                 self._inserir_marcador_generico("Formula", nova_formula.legenda)
 
-    # --- SLOTS PARA LISTAS ---
-
     @QtCore.Slot()
     def _adicionar_lista(self):
         dialog = ListaDialog(banco_listas=self.documento.banco_listas, parent=self)
-        
         if dialog.exec():
             nova_lista = dialog.get_dados_lista()
+            
+            item_bin, nome_bin = self._get_bin_alvo(self.arvore_listas)
+            nova_lista.bin_name = nome_bin
+            
             self.documento.banco_listas.append(nova_lista)
             self.atualizar_bancos_visuais()
             self._inserir_marcador_generico("Lista", nova_lista.titulo)
-
-    @QtCore.Slot()
-    def _editar_lista(self):
-        linha = self.lista_listas.currentRow()
-        if linha == -1: return
-        
-        titulo_lista = self.lista_listas.item(linha).text()
-        lista_original = next((l for l in self.documento.banco_listas if l.titulo == titulo_lista), None)
-        if not lista_original: return
-        
-        dialog = ListaDialog(lista_existente=lista_original, 
-                             banco_listas=self.documento.banco_listas, 
-                             parent=self)
-        
-        if dialog.exec():
-            lista_editada = dialog.get_dados_lista()
-            lista_original.__dict__.update(lista_editada.__dict__)
-            self.atualizar_bancos_visuais()
-
-    @QtCore.Slot()
-    def _remover_lista(self):
-        linha = self.lista_listas.currentRow()
-        if linha == -1: return
-        
-        titulo_lista = self.lista_listas.item(linha).text()
-        if QMessageBox.question(self, "Confirmar", f"Remover a lista '{titulo_lista}' do projeto?") == QMessageBox.StandardButton.Yes:
-            self.documento.banco_listas = [l for l in self.documento.banco_listas if l.titulo != titulo_lista]
-            self.atualizar_bancos_visuais()
             
-    # --- SLOTS PARA GRAFICOS ---
-
     @QtCore.Slot()
     def _adicionar_grafico(self):
         dialog = ChartDialog(banco_graficos=self.documento.banco_graficos, parent=self)
-        
         if dialog.exec():
             novo_grafico = dialog.get_dados_grafico()
+            
+            item_bin, nome_bin = self._get_bin_alvo(self.arvore_graficos)
+            novo_grafico.bin_name = nome_bin
+            
             self.documento.banco_graficos.append(novo_grafico)
             self.atualizar_bancos_visuais()
             self._inserir_marcador_generico("Grafico", novo_grafico.titulo)
 
+    # --- MÉTODOS DE EDIÇÃO/REMOÇÃO ATUALIZADOS ---
+
+    @QtCore.Slot()
+    def _editar_tabela(self):
+        item, tabela_original = self._get_item_selecionado(self.arvore_tabelas)
+        if not tabela_original:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione uma tabela (não um bin) para editar.")
+            return
+        
+        dialog = TabelaDialog(tabela=tabela_original, 
+                              banco_tabelas=self.documento.banco_tabelas, 
+                              parent=self)
+        
+        if dialog.exec():
+            tabela_original.__dict__.update(dialog.get_dados_tabela().__dict__)
+            self.atualizar_bancos_visuais() # Redesenha a árvore
+
+    @QtCore.Slot()
+    def _remover_tabela(self):
+        item, tabela = self._get_item_selecionado(self.arvore_tabelas)
+        if not tabela:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione uma tabela (não um bin) para remover.")
+            return
+
+        if QMessageBox.question(self, "Confirmar", f"Remover a tabela '{tabela.titulo}' do projeto?") == QMessageBox.StandardButton.Yes:
+            self.documento.banco_tabelas.remove(tabela)
+            self.atualizar_bancos_visuais()
+            
+    @QtCore.Slot()
+    def _editar_figura(self):
+        item, figura_original = self._get_item_selecionado(self.arvore_figuras)
+        if not figura_original:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione uma figura (não um bin) para editar.")
+            return
+        
+        dialog = DialogoFigura(figura=figura_original, 
+                               banco_figuras=self.documento.banco_figuras, 
+                               parent=self)
+        
+        if dialog.exec():
+            dados_novos = dialog.get_dados_figura()
+            figura_original.__dict__.update(dados_novos.__dict__)
+            self.atualizar_bancos_visuais()
+    
+    @QtCore.Slot()
+    def _remover_figura(self):
+        item, figura = self._get_item_selecionado(self.arvore_figuras)
+        if not figura:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione uma figura (não um bin) para remover.")
+            return
+            
+        if QMessageBox.question(self, "Confirmar", f"Remover a figura '{figura.titulo}' do projeto?") == QMessageBox.StandardButton.Yes:
+            self.documento.banco_figuras.remove(figura)
+            self.atualizar_bancos_visuais()
+            
     @QtCore.Slot()
     def _editar_grafico(self):
-        linha = self.lista_graficos.currentRow()
-        if linha == -1: return
-        
-        titulo_grafico = self.lista_graficos.item(linha).text()
-        grafico_original = next((g for g in self.documento.banco_graficos if g.titulo == titulo_grafico), None)
-        if not grafico_original: return
+        item, grafico_original = self._get_item_selecionado(self.arvore_graficos)
+        if not grafico_original:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione um gráfico (não um bin) para editar.")
+            return
         
         dialog = ChartDialog(grafico=grafico_original, 
                              banco_graficos=self.documento.banco_graficos, 
@@ -782,27 +1250,75 @@ class AbaConteudo(QWidget):
 
     @QtCore.Slot()
     def _remover_grafico(self):
-        linha = self.lista_graficos.currentRow()
-        if linha == -1: return
+        item, grafico = self._get_item_selecionado(self.arvore_graficos)
+        if not grafico:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione um gráfico (não um bin) para remover.")
+            return
         
-        titulo_grafico = self.lista_graficos.item(linha).text()
-        if QMessageBox.question(self, "Confirmar", f"Remover o gráfico '{titulo_grafico}' do projeto?") == QMessageBox.StandardButton.Yes:
-            
-            grafico_para_remover = next((g for g in self.documento.banco_graficos if g.titulo == titulo_grafico), None)
-            
-            self.documento.banco_graficos = [g for g in self.documento.banco_graficos if g.titulo != titulo_grafico]
+        if QMessageBox.question(self, "Confirmar", f"Remover o gráfico '{grafico.titulo}' do projeto?") == QMessageBox.StandardButton.Yes:
+            self.documento.banco_graficos.remove(grafico)
             self.atualizar_bancos_visuais()
             
-            if grafico_para_remover:
-                try:
-                    if os.path.exists(grafico_para_remover.caminho_imagem_processada):
-                        os.remove(grafico_para_remover.caminho_imagem_processada)
-                    if os.path.exists(grafico_para_remover.caminho_dados_json):
-                        os.remove(grafico_para_remover.caminho_dados_json)
-                except OSError as e:
-                    QMessageBox.warning(self, "Aviso", f"Não foi possível remover os arquivos de cache do gráfico:\n{e}")
+            try:
+                if os.path.exists(grafico.caminho_imagem_processada): os.remove(grafico.caminho_imagem_processada)
+                if os.path.exists(grafico.caminho_dados_json): os.remove(grafico.caminho_dados_json)
+            except OSError as e:
+                print(f"Aviso: Não foi possível remover arquivos de cache do gráfico: {e}")
 
-    # --- FIM: SLOTS PARA GRAFICOS ---
+    @QtCore.Slot()
+    def _editar_formula(self):
+        item, formula_original = self._get_item_selecionado(self.arvore_formulas)
+        if not formula_original:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione uma fórmula (não um bin) para editar.")
+            return
+            
+        dialog = DialogoFormula(formula=formula_original, 
+                                banco_formulas=self.documento.banco_formulas, 
+                                parent=self)
+        
+        if dialog.exec():
+            formula_original.__dict__.update(dialog.get_dados_formula().__dict__)
+            self.atualizar_bancos_visuais()
+    
+    @QtCore.Slot()
+    def _remover_formula(self):
+        item, formula = self._get_item_selecionado(self.arvore_formulas)
+        if not formula:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione uma fórmula (não um bin) para remover.")
+            return
+
+        if QMessageBox.question(self, "Confirmar", f"Remover a fórmula '{formula.legenda}' do projeto?") == QMessageBox.StandardButton.Yes:
+            self.documento.banco_formulas.remove(formula)
+            self.atualizar_bancos_visuais()
+            
+    @QtCore.Slot()
+    def _editar_lista(self):
+        item, lista_original = self._get_item_selecionado(self.arvore_listas)
+        if not lista_original:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione uma lista (não um bin) para editar.")
+            return
+        
+        dialog = ListaDialog(lista_existente=lista_original, 
+                             banco_listas=self.documento.banco_listas, 
+                             parent=self)
+        
+        if dialog.exec():
+            lista_editada = dialog.get_dados_lista()
+            lista_original.__dict__.update(lista_editada.__dict__)
+            self.atualizar_bancos_visuais()
+
+    @QtCore.Slot()
+    def _remover_lista(self):
+        item, lista = self._get_item_selecionado(self.arvore_listas)
+        if not lista:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione uma lista (não um bin) para remover.")
+            return
+        
+        if QMessageBox.question(self, "Confirmar", f"Remover a lista '{lista.titulo}' do projeto?") == QMessageBox.StandardButton.Yes:
+            self.documento.banco_listas.remove(lista)
+            self.atualizar_bancos_visuais()
+
+    # --- FIM DOS MÉTODOS DE EDIÇÃO/REMOÇÃO ---
 
     def _get_capitulo_selecionado(self) -> Capitulo | None:
         item = self.arvore_capitulos.currentItem()
@@ -815,83 +1331,6 @@ class AbaConteudo(QWidget):
         if capitulo:
             capitulo.conteudo = self.editor_capitulo.toPlainText()
 
-    @QtCore.Slot()
-    def _editar_tabela(self):
-        linha = self.lista_tabelas.currentRow()
-        if linha == -1: return
-        titulo_tabela = self.lista_tabelas.item(linha).text()
-        tabela_original = next((t for t in self.documento.banco_tabelas if t.titulo == titulo_tabela), None)
-        if not tabela_original: return
-        
-        dialog = TabelaDialog(tabela=tabela_original, 
-                              banco_tabelas=self.documento.banco_tabelas, 
-                              parent=self)
-        
-        if dialog.exec():
-            tabela_original.__dict__.update(dialog.get_dados_tabela().__dict__)
-            self.atualizar_bancos_visuais()
-
-
-    @QtCore.Slot()
-    def _remover_tabela(self):
-        linha = self.lista_tabelas.currentRow()
-        if linha == -1: return
-        titulo_tabela = self.lista_tabelas.item(linha).text()
-        if QMessageBox.question(self, "Confirmar", f"Remover a tabela '{titulo_tabela}' do projeto?") == QMessageBox.StandardButton.Yes:
-            self.documento.banco_tabelas = [t for t in self.documento.banco_tabelas if t.titulo != titulo_tabela]
-            self.atualizar_bancos_visuais()
-            
-    @QtCore.Slot()
-    def _editar_figura(self):
-        linha = self.lista_figuras.currentRow()
-        if linha == -1: return
-        titulo_figura = self.lista_figuras.item(linha).text()
-        figura_original = next((f for f in self.documento.banco_figuras if f.titulo == titulo_figura), None)
-        if not figura_original: return
-        
-        dialog = DialogoFigura(figura=figura_original, 
-                             banco_figuras=self.documento.banco_figuras, 
-                             parent=self)
-        
-        if dialog.exec():
-            dados_novos = dialog.get_dados_figura()
-            figura_original.__dict__.update(dados_novos.__dict__)
-            self.atualizar_bancos_visuais()
-    
-    @QtCore.Slot()
-    def _remover_figura(self):
-        linha = self.lista_figuras.currentRow()
-        if linha == -1: return
-        titulo_figura = self.lista_figuras.item(linha).text()
-        if QMessageBox.question(self, "Confirmar", f"Remover a figura '{titulo_figura}' do projeto?") == QMessageBox.StandardButton.Yes:
-            self.documento.banco_figuras = [f for f in self.documento.banco_figuras if f.titulo != titulo_figura]
-            self.atualizar_bancos_visuais()
-            
-    @QtCore.Slot()
-    def _editar_formula(self):
-        linha = self.lista_formulas.currentRow()
-        if linha == -1: return
-        legenda_formula = self.lista_formulas.item(linha).text()
-        formula_original = next((f for f in self.documento.banco_formulas if f.legenda == legenda_formula), None)
-        if not formula_original: return
-        
-        dialog = DialogoFormula(formula=formula_original, 
-                                banco_formulas=self.documento.banco_formulas, 
-                                parent=self)
-        
-        if dialog.exec():
-            formula_original.__dict__.update(dialog.get_dados_formula().__dict__)
-            self.atualizar_bancos_visuais()
-    
-    @QtCore.Slot()
-    def _remover_formula(self):
-        linha = self.lista_formulas.currentRow()
-        if linha == -1: return
-        legenda_formula = self.lista_formulas.item(linha).text()
-        if QMessageBox.question(self, "Confirmar", f"Remover a fórmula '{legenda_formula}' do projeto?") == QMessageBox.StandardButton.Yes:
-            self.documento.banco_formulas = [f for f in self.documento.banco_formulas if f.legenda != legenda_formula]
-            self.atualizar_bancos_visuais()
-    
     def _popular_arvore(self):
         self.arvore_capitulos.blockSignals(True)
         self.arvore_capitulos.clear()

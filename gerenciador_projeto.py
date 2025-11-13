@@ -1,7 +1,8 @@
 # gerenciador_projeto.py
 # Descrição: Versão corrigida para salvar brasões e fórmulas corretamente.
-# ATUALIZAÇÃO (Gráfico): Adiciona lógica para salvar/carregar
-# os arquivos de imagem (.png) e dados (.chartjson) dos gráficos.
+# ATUALIZAÇÃO (v46 - Bins): Nenhuma alteração necessária.
+# A lógica de 'to_dict' e 'from_dict' no documento.py
+# já lida com os novos campos 'bin_name' e 'banco_bins'.
 
 import os
 import json
@@ -12,7 +13,7 @@ import copy
 from PIL import Image
 
 from documento import (DocumentoABNT, Capitulo, Figura, Formula, Configuracoes,
-                       Autor, Tabela, Grafico) # <--- ADICIONADO Grafico
+                       Autor, Tabela, Grafico) # <--- Grafico já estava aqui
 from referencia import Referencia, Livro, Artigo, Site
 import gerenciador_config
 
@@ -36,10 +37,6 @@ class GerenciadorProjetos:
         """
         Processa uma imagem de brasão: converte para PNG, redimensiona para um
         tamanho padrão e a salva na pasta de destino. Retorna o nome do novo arquivo.
-        
-        NOTA: Esta função é usada pelo código antigo de salvamento. A nova lógica de 
-        salvamento (abaixo) não a utiliza mais, pois a imagem já foi processada 
-        (cortada) pelo DialogoBrasao.
         """
         if not caminho_original or not os.path.exists(caminho_original):
             return None
@@ -74,15 +71,12 @@ class GerenciadorProjetos:
             os.makedirs(formulas_png_dir)
             brasoes_dir = os.path.join(temp_dir, 'brasoes')
             os.makedirs(brasoes_dir)
-            
-            # --- INÍCIO DA MODIFICAÇÃO ---
             charts_data_dir = os.path.join(temp_dir, 'charts_data_json')
             os.makedirs(charts_data_dir)
-            # --- FIM DA MODIFICAÇÃO ---
 
             doc_para_salvar = copy.deepcopy(documento)
 
-            # --- CORREÇÃO: LÓGICA DE PROCESSAMENTO DO BRASÃO ---
+            # --- LÓGICA DE PROCESSAMENTO DO BRASÃO ---
             cfg = doc_para_salvar.configuracoes
             
             # Processa o brasão esquerdo
@@ -116,8 +110,6 @@ class GerenciadorProjetos:
                     cfg.caminho_brasao_direito_processado = None
             else:
                 cfg.caminho_brasao_direito_processado = None
-            
-            # --- FIM DA CORREÇÃO ---
 
             # Processa as figuras
             for figura in doc_para_salvar.banco_figuras:
@@ -127,7 +119,7 @@ class GerenciadorProjetos:
                     shutil.copy2(figura.caminho_processado, caminho_destino)
                     figura.caminho_processado = os.path.join('imagens', nome_arquivo).replace('\\', '/')
             
-            # --- INÍCIO: Processa os Gráficos ---
+            # Processa os Gráficos
             for grafico in doc_para_salvar.banco_graficos:
                 # 1. Copia a imagem PNG (para a pasta 'imagens', como uma figura)
                 if grafico.caminho_imagem_processada and os.path.exists(grafico.caminho_imagem_processada):
@@ -142,7 +134,6 @@ class GerenciadorProjetos:
                     caminho_destino_json = os.path.join(charts_data_dir, nome_json)
                     shutil.copy2(grafico.caminho_dados_json, caminho_destino_json)
                     grafico.caminho_dados_json = os.path.join('charts_data_json', nome_json).replace('\\', '/')
-            # --- FIM: Processa os Gráficos ---
 
             # Processa as fórmulas (SVG e PNG)
             for formula in doc_para_salvar.banco_formulas:
@@ -155,6 +146,8 @@ class GerenciadorProjetos:
                     formula.caminho_processado_png = os.path.join('formulas_png', os.path.basename(formula.caminho_processado_png)).replace('\\', '/')
             
             # Serializa e salva o projeto
+            # O to_dict() do DocumentoABNT agora salva o 'banco_bins'
+            # e o 'bin_name' de cada ativo automaticamente.
             dados_dict = doc_para_salvar.to_dict()
             caminho_json = os.path.join(temp_dir, 'documento.json')
             with open(caminho_json, 'w', encoding='utf-8') as f:
@@ -185,6 +178,8 @@ class GerenciadorProjetos:
         with open(caminho_json, 'r', encoding='utf-8') as f:
             dados_dict = json.load(f)
             
+        # O from_dict() do DocumentoABNT agora carrega o 'banco_bins'
+        # e o 'bin_name' de cada ativo automaticamente.
         documento_carregado = DocumentoABNT.from_dict(dados_dict)
 
         # Atualiza o caminho dos brasões
@@ -200,13 +195,12 @@ class GerenciadorProjetos:
             if figura.caminho_processado:
                 figura.caminho_processado = os.path.join(self.diretorio_temporario_atual, figura.caminho_processado.replace('/', os.path.sep))
 
-        # --- INÍCIO: Atualiza os caminhos dos Gráficos ---
+        # Atualiza os caminhos dos Gráficos
         for grafico in documento_carregado.banco_graficos:
             if grafico.caminho_imagem_processada:
                 grafico.caminho_imagem_processada = os.path.join(self.diretorio_temporario_atual, grafico.caminho_imagem_processada.replace('/', os.path.sep))
             if grafico.caminho_dados_json:
                 grafico.caminho_dados_json = os.path.join(self.diretorio_temporario_atual, grafico.caminho_dados_json.replace('/', os.path.sep))
-        # --- FIM: Atualiza os caminhos dos Gráficos ---
 
         # Atualiza os caminhos das fórmulas
         for formula in documento_carregado.banco_formulas:
