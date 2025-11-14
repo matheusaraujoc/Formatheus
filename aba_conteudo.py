@@ -286,7 +286,7 @@ class AbaConteudo(QWidget):
         self.bancos_tabs.setStyleSheet("""
             QTabWidget#BancosAbas QTabBar::tab {
                 font-size: 12px;
-                padding: 6px 8px;
+                padding: 4px 6px;
             }
         """)
 
