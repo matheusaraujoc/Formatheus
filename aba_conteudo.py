@@ -54,7 +54,10 @@ class MarcadorHighlighter(QSyntaxHighlighter):
             format = QTextCharFormat()
             format.setForeground(QColor(cor_hex))
             format.setFontWeight(QFont.Weight.Bold)
-            format.setBackground(QColor("#f0f0f0")) 
+            
+            # A linha abaixo foi comentada para remover o fundo cinza
+            # format.setBackground(QColor("#f0f0f0")) 
+            
             self.formats[tipo] = format
 
     def highlightBlock(self, text):
@@ -69,7 +72,7 @@ class MarcadorHighlighter(QSyntaxHighlighter):
                 tipo = match.group(5) # O tipo (QUEBRA_PAGINA)
                 if tipo in self.formats:
                     self.setFormat(match.start(4), match.end(4) - match.start(4), self.formats[tipo])
-
+                    
 # --- CLASSE EDITOR DE CONTEÚDO ---
 class EditorConteudo(QTextEdit):
     """
