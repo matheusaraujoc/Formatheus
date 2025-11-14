@@ -1,10 +1,10 @@
 # aba_conteudo.py
 # Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
 #
-# ATUALIZAÇÃO (v58 - Correção de Ícones de Tema):
-# 1. Ícones de Criar/Remover Bin agora usam QtGui.QIcon.fromTheme()
-#    para carregar os ícones monocromáticos do qdarktheme.
-# 2. Ícones da barra de formatação (assets/) mantidos.
+# ATUALIZAÇÃO (vX.X):
+# 1. Adicionada a função update_theme_icons(is_dark) para
+#    trocar manualmente os ícones da barra de formatação
+#    entre as versões normal e "-white".
 #
 
 import re
@@ -183,11 +183,25 @@ class AbaConteudo(QWidget):
         self._build_ui()
 
     def _apply_styles(self):
-        """
-        REMOVIDO: Este método aplicava estilos locais que
-        conflitavam com o qdarktheme.
-        """
         pass
+
+    # --- NOVO: Função para trocar ícones ---
+    def update_theme_icons(self, is_dark):
+        """
+        Atualiza os ícones personalizados (assets) com base no tema.
+        Chamado pelo main_app.py.
+        """
+        if is_dark:
+            self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo-white.png"))
+            self.btn_refazer.setIcon(QtGui.QIcon("assets/icons/redo-white.png"))
+            self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break-white.png"))
+            self.btn_pagina_em_branco.setIcon(QtGui.QIcon("assets/icons/blank_page-white.png"))
+        else:
+            self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo.png"))
+            self.btn_refazer.setIcon(QtGui.QIcon("assets/icons/redo.png"))
+            self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break.png"))
+            self.btn_pagina_em_branco.setIcon(QtGui.QIcon("assets/icons/blank_page.png"))
+    # --- FIM DA NOVA FUNÇÃO ---
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
@@ -273,23 +287,17 @@ class AbaConteudo(QWidget):
             titulo_layout.addStretch()
             
             btn_add_bin = QToolButton()
-            # --- CORREÇÃO DE ÍCONE (v58) ---
-            # Pede o ícone do TEMA (qdarktheme irá fornecer)
-            # Adiciona um fallback para o caso do tema não ter o ícone
             icon_add = QtGui.QIcon.fromTheme("folder-new", 
                          self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
             btn_add_bin.setIcon(icon_add)
-            # --- FIM DA CORREÇÃO ---
             btn_add_bin.setToolTip("Criar novo bin (pasta)")
             btn_add_bin.clicked.connect(add_slot)
             titulo_layout.addWidget(btn_add_bin)
             
             btn_del_bin = QToolButton()
-            # --- CORREÇÃO DE ÍCONE (v58) ---
             icon_del = QtGui.QIcon.fromTheme("edit-delete",
                          self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
             btn_del_bin.setIcon(icon_del)
-            # --- FIM DA CORREÇÃO ---
             btn_del_bin.setToolTip("Remover bin selecionado")
             btn_del_bin.setProperty("cssClass", "destructive") 
             btn_del_bin.clicked.connect(del_slot)
@@ -487,6 +495,8 @@ class AbaConteudo(QWidget):
         format_toolbar = QHBoxLayout()
         format_toolbar.addWidget(QLabel("Formatação:"))
         
+        # --- ÍCONES DE ASSETS ---
+        # (Eles serão atualizados pela nova função update_theme_icons)
         self.btn_desfazer = QToolButton()
         self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo.png"))
         self.btn_desfazer.setToolTip("Desfazer (Ctrl+Z)")
@@ -510,6 +520,7 @@ class AbaConteudo(QWidget):
         self.btn_pagina_em_branco.setToolTip("Inserir Página em Branco")
         self.btn_pagina_em_branco.clicked.connect(self._inserir_pagina_em_branco)
         format_toolbar.addWidget(self.btn_pagina_em_branco)
+        # --- FIM DOS ÍCONES DE ASSETS ---
         
         format_toolbar.addStretch()
         
