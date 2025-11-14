@@ -1,8 +1,11 @@
 # gerenciador_projeto.py
 # Descrição: Versão corrigida para salvar brasões e fórmulas corretamente.
-# ATUALIZAÇÃO (v46 - Bins): Nenhuma alteração necessária.
-# A lógica de 'to_dict' e 'from_dict' no documento.py
-# já lida com os novos campos 'bin_name' e 'banco_bins'.
+#
+# ATUALIZAÇÃO (v47 - Gráficos 3D):
+# 1. Adicionada lógica para salvar e carregar os ativos
+#    associados ao Grafico3D (imagem PNG e dados JSON).
+# 2. Importado 'Grafico3D' do documento.py.
+#
 
 import os
 import json
@@ -12,8 +15,10 @@ import shutil
 import copy
 from PIL import Image
 
+# --- INÍCIO DA MODIFICAÇÃO (v47) ---
 from documento import (DocumentoABNT, Capitulo, Figura, Formula, Configuracoes,
-                       Autor, Tabela, Grafico) # <--- Grafico já estava aqui
+                       Autor, Tabela, Grafico, Grafico3D) # <--- ADICIONADO Grafico3D
+# --- FIM DA MODIFICAÇÃO ---
 from referencia import Referencia, Livro, Artigo, Site
 import gerenciador_config
 
@@ -119,7 +124,7 @@ class GerenciadorProjetos:
                     shutil.copy2(figura.caminho_processado, caminho_destino)
                     figura.caminho_processado = os.path.join('imagens', nome_arquivo).replace('\\', '/')
             
-            # Processa os Gráficos
+            # Processa os Gráficos (2D)
             for grafico in doc_para_salvar.banco_graficos:
                 # 1. Copia a imagem PNG (para a pasta 'imagens', como uma figura)
                 if grafico.caminho_imagem_processada and os.path.exists(grafico.caminho_imagem_processada):
@@ -135,6 +140,23 @@ class GerenciadorProjetos:
                     shutil.copy2(grafico.caminho_dados_json, caminho_destino_json)
                     grafico.caminho_dados_json = os.path.join('charts_data_json', nome_json).replace('\\', '/')
 
+            # --- INÍCIO: Processar Gráficos 3D (v47) ---
+            for grafico_3d in doc_para_salvar.banco_graficos_3d:
+                # 1. Copia a imagem PNG (para a pasta 'imagens')
+                if grafico_3d.caminho_imagem_processada and os.path.exists(grafico_3d.caminho_imagem_processada):
+                    nome_imagem = os.path.basename(grafico_3d.caminho_imagem_processada)
+                    caminho_destino_img = os.path.join(imagens_dir, nome_imagem)
+                    shutil.copy2(grafico_3d.caminho_imagem_processada, caminho_destino_img)
+                    grafico_3d.caminho_imagem_processada = os.path.join('imagens', nome_imagem).replace('\\', '/')
+                
+                # 2. Copia os dados JSON (para a pasta 'charts_data_json')
+                if grafico_3d.caminho_dados_json and os.path.exists(grafico_3d.caminho_dados_json):
+                    nome_json = os.path.basename(grafico_3d.caminho_dados_json)
+                    caminho_destino_json = os.path.join(charts_data_dir, nome_json)
+                    shutil.copy2(grafico_3d.caminho_dados_json, caminho_destino_json)
+                    grafico_3d.caminho_dados_json = os.path.join('charts_data_json', nome_json).replace('\\', '/')
+            # --- FIM: Processar Gráficos 3D (v47) ---
+
             # Processa as fórmulas (SVG e PNG)
             for formula in doc_para_salvar.banco_formulas:
                 if formula.caminho_svg and os.path.exists(formula.caminho_svg):
@@ -146,8 +168,6 @@ class GerenciadorProjetos:
                     formula.caminho_processado_png = os.path.join('formulas_png', os.path.basename(formula.caminho_processado_png)).replace('\\', '/')
             
             # Serializa e salva o projeto
-            # O to_dict() do DocumentoABNT agora salva o 'banco_bins'
-            # e o 'bin_name' de cada ativo automaticamente.
             dados_dict = doc_para_salvar.to_dict()
             caminho_json = os.path.join(temp_dir, 'documento.json')
             with open(caminho_json, 'w', encoding='utf-8') as f:
@@ -178,8 +198,6 @@ class GerenciadorProjetos:
         with open(caminho_json, 'r', encoding='utf-8') as f:
             dados_dict = json.load(f)
             
-        # O from_dict() do DocumentoABNT agora carrega o 'banco_bins'
-        # e o 'bin_name' de cada ativo automaticamente.
         documento_carregado = DocumentoABNT.from_dict(dados_dict)
 
         # Atualiza o caminho dos brasões
@@ -195,12 +213,20 @@ class GerenciadorProjetos:
             if figura.caminho_processado:
                 figura.caminho_processado = os.path.join(self.diretorio_temporario_atual, figura.caminho_processado.replace('/', os.path.sep))
 
-        # Atualiza os caminhos dos Gráficos
+        # Atualiza os caminhos dos Gráficos (2D)
         for grafico in documento_carregado.banco_graficos:
             if grafico.caminho_imagem_processada:
                 grafico.caminho_imagem_processada = os.path.join(self.diretorio_temporario_atual, grafico.caminho_imagem_processada.replace('/', os.path.sep))
             if grafico.caminho_dados_json:
                 grafico.caminho_dados_json = os.path.join(self.diretorio_temporario_atual, grafico.caminho_dados_json.replace('/', os.path.sep))
+
+        # --- INÍCIO: Atualizar caminhos Gráficos 3D (v47) ---
+        for grafico_3d in documento_carregado.banco_graficos_3d:
+            if grafico_3d.caminho_imagem_processada:
+                grafico_3d.caminho_imagem_processada = os.path.join(self.diretorio_temporario_atual, grafico_3d.caminho_imagem_processada.replace('/', os.path.sep))
+            if grafico_3d.caminho_dados_json:
+                grafico_3d.caminho_dados_json = os.path.join(self.diretorio_temporario_atual, grafico_3d.caminho_dados_json.replace('/', os.path.sep))
+        # --- FIM: Atualizar caminhos Gráficos 3D (v47) ---
 
         # Atualiza os caminhos das fórmulas
         for formula in documento_carregado.banco_formulas:

@@ -1,10 +1,12 @@
 # aba_conteudo.py
 # Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
 #
-# ATUALIZAÇÃO (vX.X):
-# 1. Adicionada a função update_theme_icons(is_dark) para
-#    trocar manualmente os ícones da barra de formatação
-#    entre as versões normal e "-white".
+# ATUALIZAÇÃO (vX.X - Gráficos 3D):
+# 1. Adicionada a integração completa para 'Grafico3D'.
+# 2. Importado 'Grafico3D' do documento e 'Grafico3DDialog'.
+# 3. Adicionada nova aba "Gráficos 3D" aos bancos de ativos.
+# 4. Implementados slots _adicionar/_editar/_remover_grafico_3d.
+# 5. Atualizado MarcadorHighlighter e menus de contexto.
 #
 
 import re
@@ -19,12 +21,15 @@ from PySide6.QtGui import (QSyntaxHighlighter, QTextCharFormat, QColor,
 from PySide6.QtCore import Qt
 
 from documento import (Capitulo, Tabela, Figura, Formula, ListaABNT, 
-                       Grafico)
+                       Grafico, Grafico3D) # <--- ADICIONADO Grafico3D
 from dialogo_tabela import TabelaDialog
 from dialogo_figura import DialogoFigura
 from dialogo_formula import DialogoFormula
 from dialogo_lista import ListaDialog
 from dialogo_chart import ChartDialog
+# --- Importação do novo diálogo 3D ---
+from dialogo_grafico_3d import Grafico3DDialog
+# ------------------------------------
 import os
 
 # --- CLASSE SYNTAX HIGHLIGHTER PARA MARCADORES ---
@@ -37,17 +42,22 @@ class MarcadorHighlighter(QSyntaxHighlighter):
         super().__init__(parent)
         self.highlight_rules = []
         
+        # --- REGEX ATUALIZADO (v47) ---
         self.marker_regex = re.compile(
-            r"(\{\{(Tabela|Figura|Grafico|Formula|Lista):([^}]+)\}\})|"
+            r"(\{\{(Tabela|Figura|Grafico|Grafico3D|Formula|Lista):([^}]+)\}\})|"
             r"(\{\{(QUEBRA_PAGINA|PAGINA_EM_BRANCO)\}\})"
         )
+        # --- FIM DA ATUALIZAÇÃO ---
 
         self.formats = {}
+        # --- CORES ATUALIZADAS (v47) ---
         base_colors = {
             "Tabela": "#0078d4", "Figura": "#008a00", "Grafico": "#8a008a",
+            "Grafico3D": "#008080", # <-- Nova cor (Teal)
             "Formula": "#d13438", "Lista": "#b45f06", "QUEBRA_PAGINA": "#a0a0a0",
             "PAGINA_EM_BRANCO": "#a0a0a0",
         }
+        # --- FIM DA ATUALIZAÇÃO ---
 
         for tipo, cor_hex in base_colors.items():
             format = QTextCharFormat()
@@ -185,7 +195,6 @@ class AbaConteudo(QWidget):
     def _apply_styles(self):
         pass
 
-    # --- NOVO: Função para trocar ícones ---
     def update_theme_icons(self, is_dark):
         """
         Atualiza os ícones personalizados (assets) com base no tema.
@@ -201,7 +210,6 @@ class AbaConteudo(QWidget):
             self.btn_refazer.setIcon(QtGui.QIcon("assets/icons/redo.png"))
             self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break.png"))
             self.btn_pagina_em_branco.setIcon(QtGui.QIcon("assets/icons/blank_page.png"))
-    # --- FIM DA NOVA FUNÇÃO ---
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
@@ -261,12 +269,14 @@ class AbaConteudo(QWidget):
         self.arvore_tabelas = BinTreeWidget()
         self.arvore_figuras = BinTreeWidget()
         self.arvore_graficos = BinTreeWidget()
+        self.arvore_graficos_3d = BinTreeWidget() # <--- ADICIONADO
         self.arvore_formulas = BinTreeWidget()
         self.arvore_listas = BinTreeWidget()
         
         self.arvore_tabelas.assetBinChanged.connect(self.atualizar_bancos_visuais)
         self.arvore_figuras.assetBinChanged.connect(self.atualizar_bancos_visuais)
         self.arvore_graficos.assetBinChanged.connect(self.atualizar_bancos_visuais)
+        self.arvore_graficos_3d.assetBinChanged.connect(self.atualizar_bancos_visuais) # <--- ADICIONADO
         self.arvore_formulas.assetBinChanged.connect(self.atualizar_bancos_visuais)
         self.arvore_listas.assetBinChanged.connect(self.atualizar_bancos_visuais)
 
@@ -288,7 +298,7 @@ class AbaConteudo(QWidget):
             
             btn_add_bin = QToolButton()
             icon_add = QtGui.QIcon.fromTheme("folder-new", 
-                         self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+                                  self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
             btn_add_bin.setIcon(icon_add)
             btn_add_bin.setToolTip("Criar novo bin (pasta)")
             btn_add_bin.clicked.connect(add_slot)
@@ -296,7 +306,7 @@ class AbaConteudo(QWidget):
             
             btn_del_bin = QToolButton()
             icon_del = QtGui.QIcon.fromTheme("edit-delete",
-                         self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+                                  self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
             btn_del_bin.setIcon(icon_del)
             btn_del_bin.setToolTip("Remover bin selecionado")
             btn_del_bin.setProperty("cssClass", "destructive") 
@@ -373,11 +383,11 @@ class AbaConteudo(QWidget):
         btn_del_figura.clicked.connect(self._remover_figura)
         btn_ins_figura.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_figuras, "Figura"))
 
-        # --- Aba Gráficos ---
+        # --- Aba Gráficos (2D) ---
         graficos_widget = QWidget()
         graficos_v_layout = QVBoxLayout(graficos_widget)
         graficos_titulo_layout = _criar_layout_titulo_bin(
-            "Banco de Gráficos:",
+            "Banco de Gráficos (2D):",
             lambda: self._adicionar_bin(self.arvore_graficos, "graficos"),
             lambda: self._remover_bin(self.arvore_graficos, "graficos", self.documento.banco_graficos)
         )
@@ -406,6 +416,41 @@ class AbaConteudo(QWidget):
         btn_edit_grafico.clicked.connect(self._editar_grafico)
         btn_del_grafico.clicked.connect(self._remover_grafico)
         btn_ins_grafico.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_graficos, "Grafico"))
+
+        # --- INÍCIO: Aba Gráficos 3D ---
+        graficos_3d_widget = QWidget()
+        graficos_3d_v_layout = QVBoxLayout(graficos_3d_widget)
+        graficos_3d_titulo_layout = _criar_layout_titulo_bin(
+            "Banco de Gráficos (3D):",
+            lambda: self._adicionar_bin(self.arvore_graficos_3d, "graficos_3d"),
+            lambda: self._remover_bin(self.arvore_graficos_3d, "graficos_3d", self.documento.banco_graficos_3d)
+        )
+        graficos_3d_v_layout.addLayout(graficos_3d_titulo_layout)
+        self.filtro_graficos_3d_check = QCheckBox("Mostrar apenas do tópico atual")
+        self.filtro_graficos_3d_check.stateChanged.connect(self.atualizar_bancos_visuais)
+        graficos_3d_v_layout.addWidget(self.filtro_graficos_3d_check)
+        graficos_3d_v_layout.addWidget(self.arvore_graficos_3d)
+        
+        graficos_3d_btn_layout = QHBoxLayout()
+        btn_add_grafico_3d = QPushButton("Criar")
+        btn_edit_grafico_3d = QPushButton("Editar")
+        btn_del_grafico_3d = QPushButton("Remover")
+        btn_add_grafico_3d.setProperty("cssClass", "primary")
+        btn_edit_grafico_3d.setProperty("cssClass", "utility")
+        btn_del_grafico_3d.setProperty("cssClass", "destructive")
+        graficos_3d_btn_layout.addWidget(btn_add_grafico_3d)
+        graficos_3d_btn_layout.addWidget(btn_edit_grafico_3d)
+        graficos_3d_btn_layout.addWidget(btn_del_grafico_3d)
+        graficos_3d_v_layout.addLayout(graficos_3d_btn_layout)
+        
+        btn_ins_grafico_3d = QPushButton("Inserir no Texto")
+        graficos_3d_v_layout.addWidget(btn_ins_grafico_3d)
+        
+        btn_add_grafico_3d.clicked.connect(self._adicionar_grafico_3d)
+        btn_edit_grafico_3d.clicked.connect(self._editar_grafico_3d)
+        btn_del_grafico_3d.clicked.connect(self._remover_grafico_3d)
+        btn_ins_grafico_3d.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_graficos_3d, "Grafico3D"))
+        # --- FIM: Aba Gráficos 3D ---
 
         # --- Aba Fórmulas ---
         formulas_widget = QWidget()
@@ -477,7 +522,8 @@ class AbaConteudo(QWidget):
         
         self.bancos_tabs.addTab(tabelas_widget, "Tabelas")
         self.bancos_tabs.addTab(figuras_widget, "Figuras")
-        self.bancos_tabs.addTab(graficos_widget, "Gráficos") 
+        self.bancos_tabs.addTab(graficos_widget, "Gráficos 2D") # <--- Texto alterado
+        self.bancos_tabs.addTab(graficos_3d_widget, "Gráficos 3D") # <--- ADICIONADO
         self.bancos_tabs.addTab(formulas_widget, "Fórmulas")
         self.bancos_tabs.addTab(listas_widget, "Listas") 
 
@@ -495,8 +541,6 @@ class AbaConteudo(QWidget):
         format_toolbar = QHBoxLayout()
         format_toolbar.addWidget(QLabel("Formatação:"))
         
-        # --- ÍCONES DE ASSETS ---
-        # (Eles serão atualizados pela nova função update_theme_icons)
         self.btn_desfazer = QToolButton()
         self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo.png"))
         self.btn_desfazer.setToolTip("Desfazer (Ctrl+Z)")
@@ -520,7 +564,6 @@ class AbaConteudo(QWidget):
         self.btn_pagina_em_branco.setToolTip("Inserir Página em Branco")
         self.btn_pagina_em_branco.clicked.connect(self._inserir_pagina_em_branco)
         format_toolbar.addWidget(self.btn_pagina_em_branco)
-        # --- FIM DOS ÍCONES DE ASSETS ---
         
         format_toolbar.addStretch()
         
@@ -545,6 +588,7 @@ class AbaConteudo(QWidget):
             self.arvore_tabelas: ("tabelas", self.documento.banco_tabelas),
             self.arvore_figuras: ("figuras", self.documento.banco_figuras),
             self.arvore_graficos: ("graficos", self.documento.banco_graficos),
+            self.arvore_graficos_3d: ("graficos_3d", self.documento.banco_graficos_3d), # <--- ADICIONADO
             self.arvore_formulas: ("formulas", self.documento.banco_formulas),
             self.arvore_listas: ("listas", self.documento.banco_listas),
         }
@@ -578,7 +622,7 @@ class AbaConteudo(QWidget):
             criar_slot=self._adicionar_figura
         )
 
-        menu_graficos = menu.addMenu("Inserir Gráfico")
+        menu_graficos = menu.addMenu("Inserir Gráfico 2D")
         self._adicionar_submenus_banco(
             menu=menu_graficos, 
             banco=self.documento.banco_graficos,
@@ -586,6 +630,17 @@ class AbaConteudo(QWidget):
             inserir_slot=self._inserir_marcador_generico,
             criar_slot=self._adicionar_grafico
         )
+
+        # --- INÍCIO: Menu Gráfico 3D ---
+        menu_graficos_3d = menu.addMenu("Inserir Gráfico 3D")
+        self._adicionar_submenus_banco(
+            menu=menu_graficos_3d, 
+            banco=self.documento.banco_graficos_3d,
+            tipo="Grafico3D",
+            inserir_slot=self._inserir_marcador_generico,
+            criar_slot=self._adicionar_grafico_3d
+        )
+        # --- FIM: Menu Gráfico 3D ---
 
         menu_formulas = menu.addMenu("Inserir Fórmula")
         self._adicionar_submenus_banco(
@@ -689,6 +744,12 @@ class AbaConteudo(QWidget):
         self._popular_arvore_bin(self.arvore_graficos, self.documento.banco_graficos, 
                                  self.filtro_graficos_check, conteudo_capitulo, 
                                  "Grafico", "graficos")
+        
+        # --- INÍCIO: Atualiza Banco 3D ---
+        self._popular_arvore_bin(self.arvore_graficos_3d, self.documento.banco_graficos_3d, 
+                                 self.filtro_graficos_3d_check, conteudo_capitulo, 
+                                 "Grafico3D", "graficos_3d")
+        # --- FIM: Atualiza Banco 3D ---
         
         self._popular_arvore_bin(self.arvore_formulas, self.documento.banco_formulas, 
                                  self.filtro_formulas_check, conteudo_capitulo, 
@@ -1047,6 +1108,59 @@ class AbaConteudo(QWidget):
             self.documento.banco_graficos.append(novo_grafico)
             self.atualizar_bancos_visuais()
             self._inserir_marcador_generico("Grafico", novo_grafico.titulo)
+
+    # --- INÍCIO: Slots Gráfico 3D ---
+    @QtCore.Slot()
+    def _adicionar_grafico_3d(self):
+        # O diálogo é importado aqui para evitar dependência circular na inicialização
+        from dialogo_grafico_3d import Grafico3DDialog 
+        
+        dialog = Grafico3DDialog(banco_graficos_3d=self.documento.banco_graficos_3d, parent=self)
+        if dialog.exec():
+            novo_grafico_3d = dialog.get_dados_grafico_3d() 
+            
+            item_bin, nome_bin = self._get_bin_alvo(self.arvore_graficos_3d)
+            novo_grafico_3d.bin_name = nome_bin
+            
+            self.documento.banco_graficos_3d.append(novo_grafico_3d)
+            self.atualizar_bancos_visuais()
+            self._inserir_marcador_generico("Grafico3D", novo_grafico_3d.titulo)
+
+    @QtCore.Slot()
+    def _editar_grafico_3d(self):
+        from dialogo_grafico_3d import Grafico3DDialog 
+        
+        item, grafico_original = self._get_item_selecionado(self.arvore_graficos_3d)
+        if not grafico_original:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione um gráfico 3D (não um bin) para editar.")
+            return
+        
+        dialog = Grafico3DDialog(grafico=grafico_original, 
+                                 banco_graficos_3d=self.documento.banco_graficos_3d, 
+                                 parent=self)
+        
+        if dialog.exec():
+            dados_novos = dialog.get_dados_grafico_3d()
+            grafico_original.__dict__.update(dados_novos.__dict__)
+            self.atualizar_bancos_visuais()
+
+    @QtCore.Slot()
+    def _remover_grafico_3d(self):
+        item, grafico = self._get_item_selecionado(self.arvore_graficos_3d)
+        if not grafico:
+            QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione um gráfico 3D (não um bin) para remover.")
+            return
+        
+        if QMessageBox.question(self, "Confirmar", f"Remover o gráfico 3D '{grafico.titulo}' do projeto?") == QMessageBox.StandardButton.Yes:
+            self.documento.banco_graficos_3d.remove(grafico)
+            self.atualizar_bancos_visuais()
+            
+            try:
+                if os.path.exists(grafico.caminho_imagem_processada): os.remove(grafico.caminho_imagem_processada)
+                if os.path.exists(grafico.caminho_dados_json): os.remove(grafico.caminho_dados_json)
+            except OSError as e:
+                print(f"Aviso: Não foi possível remover arquivos de cache do gráfico 3D: {e}")
+    # --- FIM: Slots Gráfico 3D ---
 
     @QtCore.Slot()
     def _editar_tabela(self):

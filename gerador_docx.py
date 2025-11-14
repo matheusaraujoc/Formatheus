@@ -1,7 +1,12 @@
 # gerador_docx.py
 # Descrição: Versão com a correção do recuo (TAB) na primeira
 # linha do Resumo.
-# ATUALIZAÇÃO (Gráfico): Adicionada lógica para renderizar {{Grafico:Titulo}}.
+#
+# ATUALIZAÇÃO (v47 - Gráficos 3D):
+# 1. Adicionada lógica para renderizar {{Grafico3D:Titulo}}.
+# 2. Importado Grafico3D e adicionado contador_graficos_3d.
+# 3. Atualizado regex e adicionado método _renderizar_grafico_3d.
+#
 
 import os
 import re
@@ -20,9 +25,9 @@ except ImportError:
     WIN32_AVAILABLE = False
     print("AVISO: Biblioteca 'pywin32' não encontrada. A automação do sumário será desativada.")
 
-# --- INÍCIO DA MODIFICAÇÃO ---
+# --- INÍCIO DA MODIFICAÇÃO (v47) ---
 from documento import (DocumentoABNT, Capitulo, ItemLista, ListaABNT, 
-                       Grafico) # <--- ADICIONADO Grafico
+                       Grafico, Grafico3D) # <--- ADICIONADO Grafico3D
 # --- FIM DA MODIFICAÇÃO ---
 from normas_abnt import MotorNormasABNT
 
@@ -61,7 +66,8 @@ class GeradorDOCX:
         self.contador_figuras = 0
         self.contador_formulas = 0
         self.contador_listas = 0 
-        self.contador_graficos = 0 # <--- NOVO CONTADOR
+        self.contador_graficos = 0
+        self.contador_graficos_3d = 0 # <--- NOVO CONTADOR (v47)
 
     def _atualizar_sumario_com_word(self, caminho_arquivo):
         if not WIN32_AVAILABLE:
@@ -93,7 +99,6 @@ class GeradorDOCX:
         else:
             self._gerar_trabalho_academico(caminho_arquivo)
 
-    # --- FUNÇÃO ATUALIZADA (Controle de Seções) ---
     def _gerar_trabalho_academico(self, caminho_arquivo: str):
         
         # Seção 1: Capa (é a self.doc.sections[0])
@@ -160,16 +165,15 @@ class GeradorDOCX:
             numero_completo = f"{prefixo_numeracao}{i}"
             nivel_titulo = len(numero_completo.split('.'))
             
-            # Se for um capítulo de Nível 1 (ex: "2", "3", etc.) E não for o
-            # primeiro capítulo (i > 1), força uma quebra de página.
             if nivel_titulo == 1 and i > 1:
                 self.doc.add_page_break()
             
             self.regras.aplicar_estilo_titulo_secao(self.doc, numero_completo, no_filho.titulo, nivel=nivel_titulo)
 
             if no_filho.conteudo:
-                # --- REGEX ATUALIZADO ---
-                padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista|Grafico):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
+                # --- REGEX ATUALIZADO (v47) ---
+                padrao = r"\{\{(?:(Tabela|Figura|Formula|Lista|Grafico|Grafico3D):([^}]+)|(QUEBRA_PAGINA|PAGINA_EM_BRANCO))\}\}"
+                # --- FIM DA ATUALIZAÇÃO ---
                 partes = re.split(padrao, no_filho.conteudo)
 
                 idx = 0
@@ -182,8 +186,6 @@ class GeradorDOCX:
                                 p = self.doc.add_paragraph()
                                 self.regras.aplicar_estilo_paragrafo_normal(p, texto_paragrafo)
                     
-                    # (Regex Atualizado tem 3 grupos de captura, 
-                    # então (idx+3) ainda é o índice do comando)
                     if idx + 3 < len(partes): 
                         tipo_obj = partes[idx+1]
                         titulo_obj = partes[idx+2]
@@ -203,16 +205,21 @@ class GeradorDOCX:
                                     obj.numero = self.contador_figuras
                                     self._renderizar_figura(obj)
                             
-                            # --- INÍCIO: LÓGICA DE RENDERIZAÇÃO DO GRÁFICO ---
-                            # (Gráficos são numerados como figuras, mas usam o 'contador_graficos'
-                            # e o banco_graficos para encontrar o objeto correto)
                             elif tipo_obj == "Grafico":
                                 obj = next((g for g in self.doc_abnt.banco_graficos if g.titulo == titulo_obj), None)
                                 if obj:
                                     self.contador_graficos += 1
                                     obj.numero = self.contador_graficos
-                                    self._renderizar_grafico(obj) # Chama o novo método
-                            # --- FIM: LÓGICA DE RENDERIZAÇÃO DO GRÁFICO ---
+                                    self._renderizar_grafico(obj) 
+                            
+                            # --- INÍCIO: LÓGICA DE RENDERIZAÇÃO DO GRÁFICO 3D (v47) ---
+                            elif tipo_obj == "Grafico3D":
+                                obj = next((g for g in self.doc_abnt.banco_graficos_3d if g.titulo == titulo_obj), None)
+                                if obj:
+                                    self.contador_graficos_3d += 1
+                                    obj.numero = self.contador_graficos_3d
+                                    self._renderizar_grafico_3d(obj) # Chama o novo método
+                            # --- FIM: LÓGICA DE RENDERIZAÇÃO DO GRÁFICO 3D (v47) ---
 
                             elif tipo_obj == "Formula":
                                 obj = next((f for f in self.doc_abnt.banco_formulas if f.legenda == titulo_obj), None)
@@ -227,7 +234,7 @@ class GeradorDOCX:
                                     self.contador_listas += 1
                                     obj.numero = self.contador_listas
                                     self._renderizar_lista(obj)
-                        
+                            
                         elif comando:
                             if comando == "QUEBRA_PAGINA":
                                 self.doc.add_page_break()
@@ -242,7 +249,7 @@ class GeradorDOCX:
                         idx += 4 # Avança (Texto, Tipo, Titulo, Comando)
                     else:
                         idx += 1 # Avança o último bloco de texto
-            
+                
             self._renderizar_secoes_recursivamente(no_filho, prefixo_numeracao=f"{numero_completo}.")
 
     def _renderizar_tabela(self, tabela_obj):
@@ -268,11 +275,9 @@ class GeradorDOCX:
                 run.font.size = self.regras.TAMANHO_FONTE_LEGENDA
                 run.font.color.rgb = self.regras.COR_FONTE_PADRAO
                 
-                # 1. Cabeçalho (linha 0) é SEMPRE centralizado
                 if i == 0:
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                 
-                # 2. Conteúdo (outras linhas)
                 else:
                     if tabela_obj.centralizar_conteudo:
                         p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -313,13 +318,11 @@ class GeradorDOCX:
         else:
             p_imagem.paragraph_format.keep_with_next = False
 
-    # --- INÍCIO: NOVO MÉTODO PARA RENDERIZAR GRÁFICO ---
     def _renderizar_grafico(self, grafico_obj):
         """Renderiza um gráfico (imagem) no DOCX, formatado como uma Figura."""
         
         # 1. Título (Legenda Superior)
         p_titulo = self.doc.add_paragraph()
-        # ABNT trata Gráfico como Figura, mas usamos a palavra "Gráfico"
         p_titulo.add_run(f"Gráfico {grafico_obj.numero} – {grafico_obj.titulo}")
         self.regras.aplicar_estilo_legenda(p_titulo, is_titulo=True)
         p_titulo.paragraph_format.keep_with_next = True
@@ -344,9 +347,40 @@ class GeradorDOCX:
             p_fonte.add_run(f"Fonte: {grafico_obj.fonte}")
             self.regras.aplicar_estilo_legenda(p_fonte, is_titulo=False)
         else:
-            # Se não houver fonte, permite quebra de página após a imagem
             p_imagem.paragraph_format.keep_with_next = False
-    # --- FIM: NOVO MÉTODO ---
+
+    # --- INÍCIO: NOVO MÉTODO PARA RENDERIZAR GRÁFICO 3D (v47) ---
+    def _renderizar_grafico_3d(self, grafico_obj):
+        """Renderiza um gráfico 3D (imagem) no DOCX, formatado como uma Figura."""
+        
+        # 1. Título (Legenda Superior)
+        p_titulo = self.doc.add_paragraph()
+        p_titulo.add_run(f"Gráfico 3D {grafico_obj.numero} – {grafico_obj.titulo}")
+        self.regras.aplicar_estilo_legenda(p_titulo, is_titulo=True)
+        p_titulo.paragraph_format.keep_with_next = True
+
+        # 2. Imagem (Centralizada)
+        p_imagem = self.doc.add_paragraph()
+        p_imagem.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+        try:
+            p_imagem.add_run().add_picture(grafico_obj.caminho_imagem_processada, width=Cm(grafico_obj.largura_cm))
+        except Exception as e:
+            run_erro = p_imagem.add_run(f"[ERRO: Imagem do Gráfico 3D '{grafico_obj.caminho_imagem_processada}' não encontrada. {e}]")
+            run_erro.italic = True
+            run_erro.font.color.rgb = self.regras.COR_FONTE_PADRAO
+
+        p_imagem.paragraph_format.space_before = Pt(0)
+        p_imagem.paragraph_format.space_after = Pt(0)
+        p_imagem.paragraph_format.keep_with_next = True
+
+        # 3. Fonte (Legenda Inferior)
+        if grafico_obj.fonte:
+            p_fonte = self.doc.add_paragraph()
+            p_fonte.add_run(f"Fonte: {grafico_obj.fonte}")
+            self.regras.aplicar_estilo_legenda(p_fonte, is_titulo=False)
+        else:
+            p_imagem.paragraph_format.keep_with_next = False
+    # --- FIM: NOVO MÉTODO (v47) ---
 
     def _renderizar_formula(self, formula_obj):
         p_formula = self.doc.add_paragraph()
@@ -380,8 +414,6 @@ class GeradorDOCX:
         self.regras.aplicar_estilo_legenda(p_legenda, is_titulo=True)
         p_legenda.paragraph_format.space_before = Pt(6)
         p_legenda.paragraph_format.space_after = Pt(12)
-
-    # --- INÍCIO: MÉTODOS PARA RENDERIZAR LISTA DOCX ---
 
     def _get_marcador_lista(self, tipo: str, nivel: int, indice: int, prefixo_num: str) -> tuple[str, str]:
         """
@@ -426,18 +458,14 @@ class GeradorDOCX:
             p_titulo.paragraph_format.keep_with_next = True
 
         def render_itens_recursivo(item_pai: ItemLista, nivel: int, prefixo_num: str):
-            # Recuo = Recuo padrão (1.25cm) + recuo do nível (0.75cm por nível)
             recuo_base_cm = 1.25
             recuo_nivel_cm = 0.75
             
-            # Recuo total para o texto do item
             recuo_total_cm = recuo_base_cm + (nivel * recuo_nivel_cm)
-            # Recuo do marcador (um pouco menos que o texto)
             recuo_marcador_cm = recuo_base_cm + ((nivel - 1) * recuo_nivel_cm)
 
-            # Caso especial: Listas Numéricas (Seção) têm recuo 0
             if lista_obj.tipo_enumeracao == "Numérica (Seção)":
-                recuo_total_cm = 1.25 # Recuo padrão de parágrafo
+                recuo_total_cm = 1.25 
                 recuo_marcador_cm = 0
 
             for i, item_filho in enumerate(item_pai.filhos):
@@ -446,37 +474,27 @@ class GeradorDOCX:
                 )
                 
                 p = self.doc.add_paragraph()
-                p.style = 'Normal' # Garante o espaçamento 1.5
+                p.style = 'Normal' 
                 p.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
                 
-                # Aplica o recuo e o "hanging indent"
                 p.paragraph_format.left_indent = Cm(recuo_total_cm)
                 
-                # O recuo negativo da primeira linha (hanging) coloca o marcador
-                # para a esquerda do texto.
                 p.paragraph_format.first_line_indent = -Cm(recuo_total_cm - recuo_marcador_cm)
                 
-                # Adiciona o marcador (ex: "a)\t")
                 if lista_obj.tipo_enumeracao == "Numérica (Seção)":
-                    # Em listas numéricas, o marcador faz parte do texto
                     run = p.add_run(f"{marcador} {item_filho.texto}")
-                    self.regras._aplicar_formatacao_run(run) # Aplica fonte/tamanho
+                    self.regras._aplicar_formatacao_run(run)
                 else:
-                    # Em listas ABNT, usamos um TAB
                     run_marcador = p.add_run(f"{marcador}\t")
                     self.regras._aplicar_formatacao_run(run_marcador)
                     
                     run_texto = p.add_run(item_filho.texto)
                     self.regras._aplicar_formatacao_run(run_texto)
                 
-                # Chama recursivamente para os filhos
                 render_itens_recursivo(item_filho, nivel + 1, proximo_prefixo)
 
-        # Inicia a recursão (começa no nível 1)
         render_itens_recursivo(lista_obj.raiz, 1, "")
         
-    # --- FIM: MÉTODOS DE LISTA ---
-
     def _set_page_numbering(self, section):
         section.header.is_linked_to_previous = False
         header_p = section.header.paragraphs[0]
@@ -496,7 +514,6 @@ class GeradorDOCX:
     def _renderizar_capa(self):
         cfg = self.doc_abnt.configuracoes
         
-        # --- Conteúdo do Topo (Instituição/Brasão) ---
         if cfg.posicao_brasao == "Lados (Esquerdo e Direito)":
             table_header = self.doc.add_table(rows=1, cols=3)
             table_header.columns[0].width = Cm(3.5); table_header.columns[1].width = Cm(9.0); table_header.columns[2].width = Cm(3.5)
@@ -518,14 +535,12 @@ class GeradorDOCX:
                 p_inst.add_run('\n')
             p_inst.add_run(cfg.instituicao.upper()).bold = True
 
-        # --- Conteúdo dos Autores ---
         nomes_autores = '\n'.join([a.nome_completo.upper() for a in self.doc_abnt.autores])
         p_autores = self.doc.add_paragraph() 
         p_autores.paragraph_format.space_before = Pt(72)
         p_autores.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         p_autores.add_run(nomes_autores).bold = True
 
-        # --- Conteúdo do Título ---
         p_titulo = self.doc.add_paragraph() 
         p_titulo.paragraph_format.space_before = Pt(120)
         p_titulo.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -533,7 +548,6 @@ class GeradorDOCX:
         run_titulo.bold = True
         run_titulo.font.size = self.regras.TAMANHO_FONTE_CAPA
         
-        # --- Conteúdo da Base (Cidade/Ano) NO RODAPÉ ---
         section = self.doc.sections[0]
         footer = section.footer
         p_final = footer.paragraphs[0]
@@ -544,13 +558,11 @@ class GeradorDOCX:
     def _renderizar_folha_rosto(self, section):
         cfg = self.doc_abnt.configuracoes
         
-        # --- Conteúdo dos Autores ---
         nomes_autores = '\n'.join([a.nome_completo.upper() for a in self.doc_abnt.autores])
         p_autores = self.doc.add_paragraph()
         p_autores.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         p_autores.add_run(nomes_autores).bold = True
 
-        # --- Conteúdo do Título ---
         p_titulo = self.doc.add_paragraph()
         p_titulo.paragraph_format.space_before = Pt(80)
         p_titulo.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -558,7 +570,6 @@ class GeradorDOCX:
         run_titulo.bold = True
         run_titulo.font.size = self.regras.TAMANHO_FONTE_CAPA
 
-        # --- Conteúdo da Natureza do Trabalho ---
         p_natureza = self.doc.add_paragraph()
         p_natureza.paragraph_format.space_before = Pt(90)
         texto_natureza = (f"{cfg.tipo_trabalho} apresentado ao curso de {cfg.modalidade_curso} em {cfg.curso} da {cfg.instituicao}, "
@@ -569,7 +580,6 @@ class GeradorDOCX:
         p_orientador.paragraph_format.space_before = Pt(12)
         self.regras.aplicar_estilo_natureza_trabalho(p_orientador, f"Orientador(a): {self.doc_abnt.orientador}")
 
-        # --- Conteúdo da Base (Cidade/Ano) NO RODAPÉ DA SEÇÃO 2 ---
         footer = section.footer
         p_final = footer.paragraphs[0]
         p_final.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
@@ -582,10 +592,9 @@ class GeradorDOCX:
         p_resumo = self.doc.add_paragraph()
         self.regras.aplicar_estilo_resumo(p_resumo, self.doc_abnt.resumo)
         
-        # Adiciona o recuo da primeira linha
         p_resumo.paragraph_format.first_line_indent = self.regras.RECUO_PRIMEIRA_LINHA
 
-        self.doc.add_paragraph() # Espaçamento entre Resumo e Palavras-chave
+        self.doc.add_paragraph() 
         
         p_kw = self.doc.add_paragraph()
         run_kw = p_kw.add_run("Palavras-chave: ")
