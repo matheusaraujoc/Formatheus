@@ -1,11 +1,10 @@
 # aba_conteudo.py
 # Descrição: Versão com layout de 3 painéis (Árvore | Editor | Bancos)
 #
-# ATUALIZAÇÃO (v53 - Correção de Typo):
-# 1. Corrigido typo de 'QAbstractaItemView' para
-#    'QAbstractItemView' na classe ArvoreConteudo.
-# 2. Mantém a lógica de validação de bins (v52) e
-#    numeração (v51).
+# ATUALIZAÇÃO (v58 - Correção de Ícones de Tema):
+# 1. Ícones de Criar/Remover Bin agora usam QtGui.QIcon.fromTheme()
+#    para carregar os ícones monocromáticos do qdarktheme.
+# 2. Ícones da barra de formatação (assets/) mantidos.
 #
 
 import re
@@ -54,10 +53,7 @@ class MarcadorHighlighter(QSyntaxHighlighter):
             format = QTextCharFormat()
             format.setForeground(QColor(cor_hex))
             format.setFontWeight(QFont.Weight.Bold)
-            
-            # A linha abaixo foi comentada para remover o fundo cinza
             # format.setBackground(QColor("#f0f0f0")) 
-            
             self.formats[tipo] = format
 
     def highlightBlock(self, text):
@@ -72,7 +68,7 @@ class MarcadorHighlighter(QSyntaxHighlighter):
                 tipo = match.group(5) # O tipo (QUEBRA_PAGINA)
                 if tipo in self.formats:
                     self.setFormat(match.start(4), match.end(4) - match.start(4), self.formats[tipo])
-                    
+
 # --- CLASSE EDITOR DE CONTEÚDO ---
 class EditorConteudo(QTextEdit):
     """
@@ -94,9 +90,7 @@ class ArvoreConteudo(QTreeWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
-        # --- CORREÇÃO (v53) ---
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        # --- FIM DA CORREÇÃO ---
         self.setDropIndicatorShown(True)
         
     def dropEvent(self, event: QtGui.QDropEvent):
@@ -175,52 +169,25 @@ class AbaConteudo(QWidget):
         self.documento = documento
         self._carregando_capitulo = False
         
-        # --- INÍCIO DA MODIFICAÇÃO (Inline Bin-Editing) ---
-        # Roles customizadas para rastrear a edição de bins
-        # UserRole + 10: Flag para marcar se um bin é recém-criado
         self.IS_NEW_BIN_ROLE = QtCore.Qt.ItemDataRole.UserRole + 10 
-        # UserRole + 11: Armazena o nome "antigo" antes da edição começar
         self.OLD_NAME_ROLE = QtCore.Qt.ItemDataRole.UserRole + 11
         
-        # Mapa para ligar as árvores de bin aos seus modelos de dados
         self.bin_tree_map = {}
-        # (Este mapa será populado em _build_ui após as árvores serem criadas)
-        # --- FIM DA MODIFICAÇÃO ---
         
         # Fontes especiais para bins
         self.bin_font = QFont()
         self.bin_font.setBold(True)
         self.default_bin_font = QFont()
         self.default_bin_font.setItalic(True)
-        self.default_bin_brush = QColor("gray")
-
+        
         self._build_ui()
-        self._apply_styles()
 
     def _apply_styles(self):
-        """Aplica estilos CSS para os QToolButton da barra de formatação."""
-        style = """
-        QToolButton {
-            border: 1px solid transparent; 
-            padding: 5px;
-            background-color: transparent;
-            min-width: 32px; 
-            min-height: 32px; 
-            border-radius: 4px; 
-        }
-        QToolButton:hover {
-            background-color: #e0e0e0; 
-            border: 1px solid #c0c0c0; 
-        }
-        QToolButton:pressed {
-            background-color: #d0d0d0; 
-            border: 1px solid #a0a0a0;
-        }
-        QToolButton:disabled {
-            opacity: 0.6; 
-        }
         """
-        self.setStyleSheet(style)
+        REMOVIDO: Este método aplicava estilos locais que
+        conflitavam com o qdarktheme.
+        """
+        pass
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
@@ -230,22 +197,6 @@ class AbaConteudo(QWidget):
         
         left_splitter = QSplitter(QtCore.Qt.Orientation.Vertical)
         left_splitter.setMaximumWidth(350)
-
-        # --- INÍCIO DA MODIFICAÇÃO (v48) ---
-        # Adiciona estilo para a alça (handle) do splitter
-        left_splitter.setStyleSheet("""
-            QSplitter::handle:vertical {
-                background-color: #dcdcdc; /* Cor da borda */
-                height: 1px; /* Altura da barra */
-                border-top: 1px solid #c0c0c0;
-                border-bottom: 1px solid #c0c0c0;
-            }
-            QSplitter::handle:vertical:hover {
-                background-color: #0078d4; /* Cor primária */
-            }
-        """)
-        # --- FIM DA MODIFICAÇÃO (v48) ---
-
 
         # --- 1. PAINEL DO TOPO-ESQUERDO (Árvore de Capítulos) ---
         top_left_widget = QWidget()
@@ -277,6 +228,8 @@ class AbaConteudo(QWidget):
         btn_add_sub = QPushButton("Novo Subtópico")
         btn_del = QPushButton("Remover")
         
+        btn_add_topico.setProperty("cssClass", "primary")
+        btn_add_sub.setProperty("cssClass", "primary")
         btn_del.setProperty("cssClass", "destructive")
         
         btn_layout.addWidget(btn_add_topico)
@@ -313,7 +266,6 @@ class AbaConteudo(QWidget):
             }
         """)
 
-        # --- INÍCIO DA MODIFICAÇÃO (v47) ---
         # Função auxiliar local para criar o layout do título do bin
         def _criar_layout_titulo_bin(titulo: str, add_slot, del_slot) -> QHBoxLayout:
             titulo_layout = QHBoxLayout()
@@ -321,19 +273,28 @@ class AbaConteudo(QWidget):
             titulo_layout.addStretch()
             
             btn_add_bin = QToolButton()
-            btn_add_bin.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+            # --- CORREÇÃO DE ÍCONE (v58) ---
+            # Pede o ícone do TEMA (qdarktheme irá fornecer)
+            # Adiciona um fallback para o caso do tema não ter o ícone
+            icon_add = QtGui.QIcon.fromTheme("folder-new", 
+                         self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+            btn_add_bin.setIcon(icon_add)
+            # --- FIM DA CORREÇÃO ---
             btn_add_bin.setToolTip("Criar novo bin (pasta)")
             btn_add_bin.clicked.connect(add_slot)
             titulo_layout.addWidget(btn_add_bin)
             
             btn_del_bin = QToolButton()
-            btn_del_bin.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+            # --- CORREÇÃO DE ÍCONE (v58) ---
+            icon_del = QtGui.QIcon.fromTheme("edit-delete",
+                         self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+            btn_del_bin.setIcon(icon_del)
+            # --- FIM DA CORREÇÃO ---
             btn_del_bin.setToolTip("Remover bin selecionado")
-            btn_del_bin.setProperty("cssClass", "destructive") # Para estilo
+            btn_del_bin.setProperty("cssClass", "destructive") 
             btn_del_bin.clicked.connect(del_slot)
             titulo_layout.addWidget(btn_del_bin)
             return titulo_layout
-        # --- FIM DA MODIFICAÇÃO (v47) ---
 
 
         # --- Aba Tabelas ---
@@ -354,6 +315,7 @@ class AbaConteudo(QWidget):
         btn_add_tabela = QPushButton("Criar")
         btn_edit_tabela = QPushButton("Editar")
         btn_del_tabela = QPushButton("Remover")
+        btn_add_tabela.setProperty("cssClass", "primary")
         btn_edit_tabela.setProperty("cssClass", "utility")
         btn_del_tabela.setProperty("cssClass", "destructive")
         tabelas_btn_layout.addWidget(btn_add_tabela)
@@ -387,6 +349,7 @@ class AbaConteudo(QWidget):
         btn_add_figura = QPushButton("Criar")
         btn_edit_figura = QPushButton("Editar")
         btn_del_figura = QPushButton("Remover")
+        btn_add_figura.setProperty("cssClass", "primary")
         btn_edit_figura.setProperty("cssClass", "utility")
         btn_del_figura.setProperty("cssClass", "destructive")
         figuras_btn_layout.addWidget(btn_add_figura)
@@ -420,6 +383,7 @@ class AbaConteudo(QWidget):
         btn_add_grafico = QPushButton("Criar")
         btn_edit_grafico = QPushButton("Editar")
         btn_del_grafico = QPushButton("Remover")
+        btn_add_grafico.setProperty("cssClass", "primary")
         btn_edit_grafico.setProperty("cssClass", "utility")
         btn_del_grafico.setProperty("cssClass", "destructive")
         graficos_btn_layout.addWidget(btn_add_grafico)
@@ -453,6 +417,7 @@ class AbaConteudo(QWidget):
         btn_add_formula = QPushButton("Criar")
         btn_edit_formula = QPushButton("Editar")
         btn_del_formula = QPushButton("Remover")
+        btn_add_formula.setProperty("cssClass", "primary")
         btn_edit_formula.setProperty("cssClass", "utility")
         btn_del_formula.setProperty("cssClass", "destructive")
         formulas_btn_layout.addWidget(btn_add_formula)
@@ -486,6 +451,7 @@ class AbaConteudo(QWidget):
         btn_add_lista = QPushButton("Criar")
         btn_edit_lista = QPushButton("Editar")
         btn_del_lista = QPushButton("Remover")
+        btn_add_lista.setProperty("cssClass", "primary")
         btn_edit_lista.setProperty("cssClass", "utility")
         btn_del_lista.setProperty("cssClass", "destructive")
         listas_btn_layout.addWidget(btn_add_lista)
@@ -501,7 +467,6 @@ class AbaConteudo(QWidget):
         btn_del_lista.clicked.connect(self._remover_lista)
         btn_ins_lista.clicked.connect(lambda: self._inserir_marcador_selecionado(self.arvore_listas, "Lista"))
         
-        # Adiciona os widgets criados como abas no QTabWidget
         self.bancos_tabs.addTab(tabelas_widget, "Tabelas")
         self.bancos_tabs.addTab(figuras_widget, "Figuras")
         self.bancos_tabs.addTab(graficos_widget, "Gráficos") 
@@ -565,8 +530,6 @@ class AbaConteudo(QWidget):
         
         layout.addWidget(right_panel, 1) 
         
-        # --- INÍCIO DA MODIFICAÇÃO (Inline Bin-Editing) ---
-        # Popula o mapa de árvores e conecta os sinais de edição
         self.bin_tree_map = {
             self.arvore_tabelas: ("tabelas", self.documento.banco_tabelas),
             self.arvore_figuras: ("figuras", self.documento.banco_figuras),
@@ -576,18 +539,14 @@ class AbaConteudo(QWidget):
         }
         
         for tree in self.bin_tree_map.keys():
-            # Conecta o handler que processa a mudança de nome
             tree.itemChanged.connect(self._on_bin_item_changed)
-        # --- FIM DA MODIFICAÇÃO ---
         
         self._popular_arvore()
         if self.arvore_capitulos.topLevelItemCount() > 0:
             self.arvore_capitulos.setCurrentItem(self.arvore_capitulos.topLevelItem(0))
 
-    # --- MÉTODOS DE MENU DE CONTEXTO (MODIFICADOS) ---
-
     @QtCore.Slot(QMenu)
-    def _adicionar_acoes_menu_contexto(self, menu: QMenu): # Aceita o menu nativo
+    def _adicionar_acoes_menu_contexto(self, menu: QMenu):
         menu.addSeparator() 
 
         menu_tabelas = menu.addMenu("Inserir Tabela")
@@ -653,113 +612,81 @@ class AbaConteudo(QWidget):
     def _inserir_marcador_generico(self, tipo: str, nome: str):
         self.editor_capitulo.insertPlainText(f"\n{{{{{tipo}:{nome}}}}}\n")
 
-    # --- FIM DOS MÉTODOS DE MENU DE CONTEXTO ---
-
-    # --- INÍCIO DA MODIFICAÇÃO (v46) ---
-    # Método genérico para popular uma BinTreeWidget
     def _popular_arvore_bin(self, tree_widget: BinTreeWidget, lista_ativos: list, filtro_check: QCheckBox, conteudo_capitulo: str, tipo_marcador: str, bin_key: str):
-        """
-        Popula uma BinTreeWidget, organizando os ativos em bins.
-        Aplica o filtro de "tópico atual" se estiver ativo.
-        """
         tree_widget.blockSignals(True)
         tree_widget.clear()
 
-        # 1. Obter o conjunto de ativos usados neste tópico, se o filtro estiver ativo
         titulos_usados = set()
         filtrar_topico = filtro_check.isChecked() and conteudo_capitulo
         if filtrar_topico:
             titulos_usados = set(re.findall(r"\{\{" + tipo_marcador + r":([^}]+)\}\}", conteudo_capitulo))
 
-        # 2. Criar os Bins
-        bins_existentes = {} # Mapeia nome do bin -> QTreeWidgetItem
+        bins_existentes = {}
         
-        # Bin Padrão (sempre existe)
         bin_padrao = QTreeWidgetItem(tree_widget, ["(Padrão)"])
         bin_padrao.setFont(0, self.default_bin_font)
-        bin_padrao.setForeground(0, self.default_bin_brush)
+        
         bin_padrao.setToolTip(0, "Itens que não estão em um bin")
-        bin_padrao.setFlags(bin_padrao.flags() & ~Qt.ItemFlag.ItemIsEditable & ~Qt.ItemFlag.ItemIsDropEnabled & ~Qt.ItemFlag.ItemIsDragEnabled) # Não pode ser editado, alvo ou arrastado
+        bin_padrao.setFlags(bin_padrao.flags() & ~Qt.ItemFlag.ItemIsEditable & ~Qt.ItemFlag.ItemIsDropEnabled & ~Qt.ItemFlag.ItemIsDragEnabled) 
         bins_existentes["(Padrão)"] = bin_padrao
         
-        # Bins do Usuário
         for nome_bin in sorted(self.documento.banco_bins.get(bin_key, [])):
             item_bin = QTreeWidgetItem(tree_widget, [nome_bin])
             item_bin.setFont(0, self.bin_font)
-            item_bin.setFlags(item_bin.flags() & ~Qt.ItemFlag.ItemIsDragEnabled) # Bins não podem ser arrastados
+            item_bin.setFlags(item_bin.flags() & ~Qt.ItemFlag.ItemIsDragEnabled) 
             
-            # --- INÍCIO DA MODIFICAÇÃO (Inline Bin-Editing) ---
-            # Permite que bins existentes sejam renomeados
             item_bin.setFlags(item_bin.flags() | Qt.ItemFlag.ItemIsEditable) 
-            # Armazena o nome atual para lógica de renomeação
             item_bin.setData(0, self.OLD_NAME_ROLE, nome_bin) 
-            # --- FIM DA MODIFICAÇÃO ---
             
             item_bin.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
             bins_existentes[nome_bin] = item_bin
             
-        # 3. Adicionar Ativos aos Bins
         for ativo in lista_ativos:
             nome_ativo = getattr(ativo, 'titulo', None) or getattr(ativo, 'legenda', None)
             if not nome_ativo:
                 continue
 
-            # Aplica filtro de tópico
             if filtrar_topico and nome_ativo not in titulos_usados:
                 continue
 
-            # Encontra o bin pai
             nome_bin = ativo.bin_name
             if nome_bin and nome_bin in bins_existentes:
                 item_bin_pai = bins_existentes[nome_bin]
             else:
-                item_bin_pai = bin_padrao # Padrão
+                item_bin_pai = bin_padrao
 
-            # Cria o item do ativo
             item_ativo = QTreeWidgetItem(item_bin_pai, [nome_ativo])
-            item_ativo.setData(0, QtCore.Qt.ItemDataRole.UserRole, ativo) # Armazena o objeto
-            item_ativo.setFlags(item_ativo.flags() & ~Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsDragEnabled) # Ativos podem ser arrastados
+            item_ativo.setData(0, QtCore.Qt.ItemDataRole.UserRole, ativo)
+            item_ativo.setFlags(item_ativo.flags() & ~Qt.ItemFlag.ItemIsEditable | Qt.ItemFlag.ItemIsDragEnabled) 
             
         tree_widget.expandAll()
         tree_widget.blockSignals(False)
     
     @QtCore.Slot()
     def atualizar_bancos_visuais(self):
-        """
-        Atualiza TODOS os bancos de ativos (árvores),
-        respeitando os filtros de tópico e os bins.
-        """
         capitulo_selecionado = self._get_capitulo_selecionado()
         conteudo_capitulo = capitulo_selecionado.conteudo if capitulo_selecionado else ""
 
-        # Popula Tabelas
         self._popular_arvore_bin(self.arvore_tabelas, self.documento.banco_tabelas, 
                                  self.filtro_tabelas_check, conteudo_capitulo, 
                                  "Tabela", "tabelas")
         
-        # Popula Figuras
         self._popular_arvore_bin(self.arvore_figuras, self.documento.banco_figuras, 
                                  self.filtro_figuras_check, conteudo_capitulo, 
                                  "Figura", "figuras")
                                  
-        # Popula Gráficos
         self._popular_arvore_bin(self.arvore_graficos, self.documento.banco_graficos, 
                                  self.filtro_graficos_check, conteudo_capitulo, 
                                  "Grafico", "graficos")
         
-        # Popula Fórmulas
         self._popular_arvore_bin(self.arvore_formulas, self.documento.banco_formulas, 
                                  self.filtro_formulas_check, conteudo_capitulo, 
                                  "Formula", "formulas")
 
-        # Popula Listas
         self._popular_arvore_bin(self.arvore_listas, self.documento.banco_listas, 
                                  self.filtro_listas_check, conteudo_capitulo, 
                                  "Lista", "listas")
     
-    # --- FIM DA MODIFICAÇÃO (v46) ---
-
-
     @QtCore.Slot()
     def _inserir_quebra_pagina(self):
         self.editor_capitulo.insertPlainText("\n{{QUEBRA_PAGINA}}\n")
@@ -771,7 +698,6 @@ class AbaConteudo(QWidget):
     @QtCore.Slot()
     def _on_editor_text_changed(self):
         self._salvar_conteudo_capitulo()
-        # Atualiza os filtros caso um novo marcador tenha sido digitado
         self.atualizar_bancos_visuais()
 
     def _get_item_numero_completo(self, item: QTreeWidgetItem) -> str:
@@ -799,7 +725,7 @@ class AbaConteudo(QWidget):
     @QtCore.Slot(QTreeWidgetItem, QTreeWidgetItem)
     def _on_capitulo_selecionado_changed(self, item_atual, item_anterior):
         self._carregar_capitulo_no_editor(item_atual, item_anterior)
-        self.atualizar_bancos_visuais() # Atualiza os filtros para o novo capítulo
+        self.atualizar_bancos_visuais() 
 
         if item_atual:
             try:
@@ -867,40 +793,24 @@ class AbaConteudo(QWidget):
         self.editor_capitulo.setEnabled(True)
         self._carregando_capitulo = False
 
-    # --- INÍCIO DA MODIFICAÇÃO (v52) ---
-    # Métodos genéricos para gerenciamento de Bins
-    
     def _adicionar_bin(self, tree_widget: QTreeWidget, bin_key: str):
-        """
-        Adiciona um novo item de bin na árvore e o coloca
-        imediatamente em modo de edição (estilo Windows).
-        """
-        # --- Lógica de numeração (v51) ---
         base_name = "Novo Bin"
         temp_name = base_name
         
-        # 1. Verifica se "Novo Bin" (sem número) existe
         if tree_widget.findItems(temp_name, Qt.MatchFlag.MatchExactly):
-            # Se existe, começa a procurar por "Novo Bin 2"
             i = 2
             while True:
                 temp_name = f"{base_name} {i}"
                 if not tree_widget.findItems(temp_name, Qt.MatchFlag.MatchExactly):
-                    # Encontrou um nome vago
                     break
                 i += 1
-        # Se "Novo Bin" não existia, temp_name já é "Novo Bin"
-        # --- Fim da lógica de numeração ---
-
-        # Bloqueia sinais para evitar 'itemChanged' prematuro
+        
         tree_widget.blockSignals(True)
 
-        # Cria o item na UI
         item_bin = QTreeWidgetItem(tree_widget, [temp_name])
         item_bin.setFont(0, self.bin_font)
         item_bin.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
         
-        # Define as flags (editável, mas não arrastável)
         flags = (Qt.ItemFlag.ItemIsSelectable | 
                  Qt.ItemFlag.ItemIsUserCheckable | 
                  Qt.ItemFlag.ItemIsEnabled | 
@@ -908,25 +818,17 @@ class AbaConteudo(QWidget):
                  Qt.ItemFlag.ItemIsEditable)
         item_bin.setFlags(flags)
         
-        # Armazena os dados temporários no item
-        item_bin.setData(0, self.IS_NEW_BIN_ROLE, True) # Marca como "novo"
-        item_bin.setData(0, self.OLD_NAME_ROLE, temp_name) # Armazena nome
+        item_bin.setData(0, self.IS_NEW_BIN_ROLE, True) 
+        item_bin.setData(0, self.OLD_NAME_ROLE, temp_name) 
         
-        # Desbloqueia os sinais
         tree_widget.blockSignals(False)
         
-        # Garante foco e inicia a edição
         tree_widget.setFocus()
         tree_widget.setCurrentItem(item_bin)
-        tree_widget.editItem(item_bin, 0) # Inicia a edição
+        tree_widget.editItem(item_bin, 0) 
 
     @QtCore.Slot(QTreeWidgetItem, int)
     def _on_bin_item_changed(self, item: QTreeWidgetItem, column: int):
-        """
-        Handler chamado QUANDO a edição de um item de bin (novo ou existente)
-        é concluída.
-        """
-        # Ignora se não for a coluna 0 ou se for um item filho (um ativo)
         if column != 0 or item.parent():
             return
             
@@ -934,7 +836,6 @@ class AbaConteudo(QWidget):
         if not tree_widget or tree_widget not in self.bin_tree_map:
             return
 
-        # 1. Obter dados de contexto
         bin_key, banco_de_ativos = self.bin_tree_map[tree_widget]
         lista_bins_modelo = self.documento.banco_bins.get(bin_key, [])
         
@@ -942,81 +843,57 @@ class AbaConteudo(QWidget):
         is_new = item.data(0, self.IS_NEW_BIN_ROLE) or False
         old_name = item.data(0, self.OLD_NAME_ROLE)
 
-        # 2. Lógica de Validação e Cancelamento
-        
-        # CASO A: Usuário cancelou a criação (pressionou Esc)
-        # O QLineEdit reverte o texto para o old_name
         if new_name == old_name and is_new:
             tree_widget.blockSignals(True)
             tree_widget.takeTopLevelItem(tree_widget.indexOfTopLevelItem(item))
             tree_widget.blockSignals(False)
             return
         
-        # CASO B: Nome ficou vazio (usuário apagou e deu Enter)
         if not new_name:
             tree_widget.blockSignals(True) 
             QMessageBox.warning(self, "Nome Inválido", "O nome do bin não pode ficar vazio.")
-            # CORREÇÃO (v52): Sempre reverter, nunca deletar
             item.setText(0, old_name) 
             tree_widget.blockSignals(False) 
             return
             
-        # CASO C: Nome reservado
         if new_name == "(Padrão)":
             tree_widget.blockSignals(True)
             QMessageBox.warning(self, "Nome Inválido", "Este nome é reservado.")
-            # CORREÇÃO (v52): Sempre reverter, nunca deletar
             item.setText(0, old_name)
             tree_widget.blockSignals(False)
             return
 
-        # CASO D: Nome duplicado
-        # (Procura na lista de bins do modelo, ignorando o nome antigo)
         outros_nomes = [b.lower() for b in lista_bins_modelo if b.lower() != (old_name.lower() if old_name else None)]
         if new_name.lower() in outros_nomes:
             tree_widget.blockSignals(True)
             QMessageBox.warning(self, "Nome Duplicado", "Já existe um bin com este nome.")
-            # CORREÇÃO (v52): Sempre reverter, nunca deletar
             item.setText(0, old_name)
             tree_widget.blockSignals(False)
             return
-
-        # 3. Salvar no Modelo de Dados (Nome é válido)
         
         tree_widget.blockSignals(True)
         
         if is_new:
-            # É um bin novo, apenas adiciona ao modelo
             lista_bins_modelo.append(new_name)
             self.documento.banco_bins[bin_key] = lista_bins_modelo
-            # Remove a flag de "novo"
             item.setData(0, self.IS_NEW_BIN_ROLE, None) 
         
         else:
-            # É uma renomeação de um bin existente
-            # (Verifica se old_name está no modelo - pode não estar se a 
-            #  edição anterior falhou, mas o old_name_role foi atualizado)
             if old_name in lista_bins_modelo:
                 lista_bins_modelo.remove(old_name)
             
             lista_bins_modelo.append(new_name)
             self.documento.banco_bins[bin_key] = lista_bins_modelo
             
-            # Atualiza todos os ativos que usavam o nome antigo
             for ativo in banco_de_ativos:
                 if getattr(ativo, 'bin_name', None) == old_name:
                     ativo.bin_name = new_name
-            
-        # Atualiza o "nome antigo" para a próxima renomeação
+                    
         item.setData(0, self.OLD_NAME_ROLE, new_name)
         
         tree_widget.blockSignals(False)
 
-    # --- FIM DA MODIFICAÇÃO (v52) ---
-
-
     def _remover_bin(self, tree_widget: BinTreeWidget, bin_key: str, banco_ativos: list):
-        """Remove um bin, movendo todos os seus ativos para o bin (Padrão)."""
         item_selecionado = tree_widget.currentItem()
         if not item_selecionado or item_selecionado.parent():
             QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione um bin (pasta) para remover.")
@@ -1024,7 +901,6 @@ class AbaConteudo(QWidget):
             
         nome_bin = item_selecionado.text(0)
         
-        # Proteção contra remoção de um item recém-criado
         if item_selecionado.data(0, self.IS_NEW_BIN_ROLE):
             tree_widget.takeTopLevelItem(tree_widget.indexOfTopLevelItem(item_selecionado))
             return
@@ -1038,57 +914,42 @@ class AbaConteudo(QWidget):
             f"Todos os itens dentro dele serão movidos para o bin '(Padrão)'.")
             
         if resposta == QMessageBox.StandardButton.Yes:
-            # Remove do modelo de dados
             if nome_bin in self.documento.banco_bins.get(bin_key, []):
                 self.documento.banco_bins[bin_key].remove(nome_bin)
                 
-            # Atualiza o bin_name de todos os ativos órfãos
             for ativo in banco_ativos:
                 if getattr(ativo, 'bin_name', None) == nome_bin:
                     ativo.bin_name = None
-                        
-            # Redesenha todas as árvores (mais fácil do que mover os itens na UI)
+                            
             self.atualizar_bancos_visuais()
 
     def _get_item_selecionado(self, tree_widget: QTreeWidget) -> tuple[QTreeWidgetItem | None, object | None]:
-        """
-        Retorna o item e o objeto de dados (ativo) selecionado.
-        Retorna (None, None) se um bin ou nada for selecionado.
-        """
         item = tree_widget.currentItem()
         if not item or not item.parent():
-            # Nenhum item selecionado, ou o item é um bin (não tem pai)
             return None, None
             
         asset = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         return item, asset
         
     def _get_bin_alvo(self, tree_widget: QTreeWidget) -> tuple[QTreeWidgetItem, str | None]:
-        """
-        Descobre em qual bin um novo ativo deve ser criado.
-        Retorna (item_do_bin_widget, nome_do_bin_string).
-        """
         item_selecionado = tree_widget.currentItem()
         item_bin_alvo = None
         
         if item_selecionado:
-            if item_selecionado.parent() is None: # É um bin
+            if item_selecionado.parent() is None:
                 item_bin_alvo = item_selecionado
-            else: # É um ativo
+            else:
                 item_bin_alvo = item_selecionado.parent()
         
         if not item_bin_alvo:
-            # Nada selecionado, encontra o bin "(Padrão)"
             padrao_itens = tree_widget.findItems("(Padrão)", Qt.MatchFlag.MatchExactly)
             if padrao_itens:
                 item_bin_alvo = padrao_itens[0]
             else:
-                # Fallback de segurança (nunca deve acontecer)
                 item_bin_alvo = tree_widget.invisibleRootItem()
         
         nome_bin = item_bin_alvo.text(0)
         
-        # Proteção contra adição em um bin recém-criado e ainda não salvo
         if item_bin_alvo.data(0, self.IS_NEW_BIN_ROLE):
             item_bin_alvo = tree_widget.findItems("(Padrão)", Qt.MatchFlag.MatchExactly)[0]
             nome_bin = "(Padrão)"
@@ -1098,7 +959,6 @@ class AbaConteudo(QWidget):
         return item_bin_alvo, nome_bin
 
     def _inserir_marcador_selecionado(self, tree_widget: QTreeWidget, tipo_marcador: str):
-        """Insere o marcador do ativo selecionado no editor."""
         item, asset = self._get_item_selecionado(tree_widget)
         if not asset:
             QMessageBox.warning(self, "Atenção", "Por favor, selecione um item (não um bin) para inserir.")
@@ -1107,9 +967,6 @@ class AbaConteudo(QWidget):
         nome_ativo = getattr(asset, 'titulo', None) or getattr(asset, 'legenda', None)
         if nome_ativo:
             self._inserir_marcador_generico(tipo_marcador, nome_ativo)
-
-    # --- FIM DA MODIFICAÇÃO (v46) ---
-
 
     @QtCore.Slot()
     def _adicionar_tabela(self):
@@ -1180,8 +1037,6 @@ class AbaConteudo(QWidget):
             self.atualizar_bancos_visuais()
             self._inserir_marcador_generico("Grafico", novo_grafico.titulo)
 
-    # --- MÉTODOS DE EDIÇÃO/REMOÇÃO ATUALIZADOS ---
-
     @QtCore.Slot()
     def _editar_tabela(self):
         item, tabela_original = self._get_item_selecionado(self.arvore_tabelas)
@@ -1195,7 +1050,7 @@ class AbaConteudo(QWidget):
         
         if dialog.exec():
             tabela_original.__dict__.update(dialog.get_dados_tabela().__dict__)
-            self.atualizar_bancos_visuais() # Redesenha a árvore
+            self.atualizar_bancos_visuais()
 
     @QtCore.Slot()
     def _remover_tabela(self):
@@ -1216,8 +1071,8 @@ class AbaConteudo(QWidget):
             return
         
         dialog = DialogoFigura(figura=figura_original, 
-                               banco_figuras=self.documento.banco_figuras, 
-                               parent=self)
+                                 banco_figuras=self.documento.banco_figuras, 
+                                 parent=self)
         
         if dialog.exec():
             dados_novos = dialog.get_dados_figura()
@@ -1276,8 +1131,8 @@ class AbaConteudo(QWidget):
             return
             
         dialog = DialogoFormula(formula=formula_original, 
-                                banco_formulas=self.documento.banco_formulas, 
-                                parent=self)
+                                  banco_formulas=self.documento.banco_formulas, 
+                                  parent=self)
         
         if dialog.exec():
             formula_original.__dict__.update(dialog.get_dados_formula().__dict__)
@@ -1321,8 +1176,6 @@ class AbaConteudo(QWidget):
             self.documento.banco_listas.remove(lista)
             self.atualizar_bancos_visuais()
 
-    # --- FIM DOS MÉTODOS DE EDIÇÃO/REMOÇÃO ---
-
     def _get_capitulo_selecionado(self) -> Capitulo | None:
         item = self.arvore_capitulos.currentItem()
         return item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
@@ -1345,7 +1198,6 @@ class AbaConteudo(QWidget):
                 if not filho_modelo.is_template_item and filho_modelo.pai == self.documento.estrutura_textual:
                     font = item_widget.font(0); font.setItalic(True)
                     item_widget.setFont(0, font)
-                    item_widget.setForeground(0, QtGui.QColor('dimgray'))
                     item_widget.setToolTip(0, "Este é um capítulo personalizado (não pertence ao modelo padrão).")
                 if no_pai_widget is self.arvore_capitulos:
                     no_pai_widget.addTopLevelItem(item_widget)

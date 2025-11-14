@@ -1,6 +1,13 @@
 # gerenciador_config.py
 # Descrição: Lida com o salvamento e carregamento de configurações da aplicação,
 # como a lista de projetos recentes, e as configurações de backup e recuperação.
+#
+# ATUALIZAÇÃO (vX.X):
+# 1. Adicionado "ui_settings" em get_default_config() para salvar o tema.
+# 2. O tema padrão é "light".
+# 3. Adicionado "search_bar_visible" (padrão True) para a barra de busca.
+# 4. carregar_config() foi atualizado para mesclar essas novas chaves.
+#
 
 import os
 import json
@@ -21,7 +28,13 @@ def get_default_config():
         "backup": {
             "backup_on_save_enabled": True,
             "max_backups_per_project": 10
+        },
+        # --- NOVO ---
+        "ui_settings": {
+            "theme": "light", # Padrão é "light" (claro)
+            "search_bar_visible": True # Padrão é "True" (aberta)
         }
+        # --- FIM ---
     }
 
 def carregar_config():
@@ -36,12 +49,21 @@ def carregar_config():
             config = json.load(f)
 
         defaults = get_default_config()
+        
+        # Mescla seções existentes
         config.setdefault('recovery', defaults['recovery'])
         if 'autosave_interval_min' in config['recovery']:
             del config['recovery']['autosave_interval_min']
         config['recovery'].setdefault('autosave_periodic_interval_min', defaults['recovery']['autosave_periodic_interval_min'])
         
         config.setdefault('backup', defaults['backup'])
+        
+        # --- NOVO: Mescla a seção de UI e suas chaves ---
+        config.setdefault('ui_settings', defaults['ui_settings'])
+        # Garante que as chaves individuais existam se a seção ui_settings já existir
+        config['ui_settings'].setdefault('theme', defaults['ui_settings']['theme'])
+        config['ui_settings'].setdefault('search_bar_visible', defaults['ui_settings']['search_bar_visible'])
+        # --- FIM ---
         
         return config
     except (json.JSONDecodeError, IOError):

@@ -1,9 +1,12 @@
 # main_app.py
-# Descrição: Versão completa com integração do stylesheet
-# e chamada da função get_style_sheet() para carregar ícones.
-# Correção: Botão "Gerar Docx" movido para o canto do QTabWidget.
-# Correção (Bug Navegação): Adicionado slot _navegar_preview_para_ancora
-# e _on_editor_modificado para evitar recarregamento da preview.
+# Descrição: Versão completa com integração do qdarktheme
+#
+# ATUALIZAÇÃO (vX.X):
+# 1. Adicionado "zoom dinâmico": o zoom do preview agora
+#    se ajusta quando o splitter é movido.
+# 2. Conectado o sinal splitter.splitterMoved ao novo
+#    slot _on_splitter_moved.
+#
 
 import sys
 import os
@@ -13,14 +16,22 @@ os.environ['QTWEBENGINE_REMOTE_DEBUGGING'] = '9222'
 
 import shutil
 from datetime import datetime
-from PySide6 import QtWidgets, QtCore
+from PySide6 import QtWidgets, QtCore, QtGui 
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEdit,
                                QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog,
                                QMessageBox, QTabWidget, QComboBox,
-                               QFormLayout, QMenuBar, QCheckBox, QSplitter)
-from PySide6.QtGui import QAction, QKeySequence, QActionGroup
+                               QFormLayout, QMenuBar, QCheckBox, QSplitter, QStyle)
+from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QIcon 
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
+
+# --- Tenta importar o tema ---
+try:
+    import qdarktheme
+    HAS_THEME_LIB = True
+except ImportError:
+    HAS_THEME_LIB = False
+# ------------------------
 
 # --- IMPORTS DE ESTILO ---
 import stylesheet 
@@ -59,6 +70,22 @@ class ABNTHelperApp(QWidget):
         self._populando_ui = False
         
         self.wants_to_restart = False
+        
+        saved_theme = self.config['ui_settings']['theme']
+        self.is_dark_theme = (saved_theme == "dark")
+        
+        self.is_search_bar_visible = self.config['ui_settings']['search_bar_visible']
+
+        # --- NOVO: Configurações de Zoom Dinâmico ---
+        self.BASE_ZOOM_FACTOR = 0.75
+        # Baseado em setSizes([800, 600]) em _reconfigurar_layout
+        initial_editor_width = 800
+        initial_preview_width = 600
+        total_initial_width = initial_editor_width + initial_preview_width
+        
+        # Define a proporção "neutra" onde o zoom é 0.75
+        self.NEUTRAL_PREVIEW_RATIO = initial_preview_width / total_initial_width
+        # --- FIM DA ADIÇÃO ---
 
         self.modo_preview = "lado_a_lado"
         self.preview_update_timer = QtCore.QTimer(self)
@@ -82,42 +109,61 @@ class ABNTHelperApp(QWidget):
         self._conectar_sinais_modificacao()
         gerenciador_recuperacao.setup_diretorios()
 
+    @QtCore.Slot()
+    def toggle_theme(self):
+        """Alterna o tema da aplicação inteira."""
+        if not HAS_THEME_LIB: return
+        
+        self.is_dark_theme = not self.is_dark_theme
+        theme = "dark" if self.is_dark_theme else "light"
+        
+        qss = qdarktheme.load_stylesheet(theme)
+        qss += stylesheet.get_style_sheet() 
+        
+        QApplication.instance().setStyleSheet(qss)
+        
+        self.config['ui_settings']['theme'] = theme
+        gerenciador_config.salvar_config(self.config)
+
     def _build_ui(self):
         menu_bar = QMenuBar(self)
         self.main_layout.setMenuBar(menu_bar)
 
+        style = self.style() 
+
         menu_arquivo = menu_bar.addMenu("&Arquivo")
         
-        acao_novo = QAction("&Novo Projeto", self)
+        acao_novo = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileIcon), "&Novo Projeto", self)
         acao_novo.triggered.connect(self._novo_projeto)
         menu_arquivo.addAction(acao_novo)
         
-        acao_carregar = QAction("&Carregar Projeto...", self)
+        acao_carregar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton), "&Carregar Projeto...", self)
         acao_carregar.triggered.connect(self._carregar_projeto)
         menu_arquivo.addAction(acao_carregar)
         menu_arquivo.addSeparator()
 
-        acao_salvar = QAction("&Salvar", self)
+        acao_salvar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "&Salvar", self)
         acao_salvar.setShortcut("Ctrl+S")
         acao_salvar.triggered.connect(self._salvar_projeto)
         menu_arquivo.addAction(acao_salvar)
         
-        acao_salvar_como = QAction("Salvar &Como...", self)
+        acao_salvar_como = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "Salvar &Como...", self)
         acao_salvar_como.triggered.connect(self._salvar_projeto_como)
         menu_arquivo.addAction(acao_salvar_como)
         menu_arquivo.addSeparator()
 
-        acao_voltar = QAction("Voltar à Tela Inicial", self)
+        acao_voltar = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowBack), "Voltar à Tela Inicial", self)
         acao_voltar.triggered.connect(self._voltar_tela_inicial)
         menu_arquivo.addAction(acao_voltar)
         menu_arquivo.addSeparator()
 
-        acao_sair = QAction("Sai&r", self)
+        acao_sair = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton), "Sai&r", self)
         acao_sair.triggered.connect(self.close)
         menu_arquivo.addAction(acao_sair)
         
         menu_editar = menu_bar.addMenu("&Editar")
-        acao_localizar = QAction("&Localizar...", self)
+        
+        acao_localizar = QAction(QtGui.QIcon.fromTheme("edit-find"), "&Localizar...", self)
         acao_localizar.setShortcut(QKeySequence.StandardKey.Find)
         acao_localizar.triggered.connect(self._alternar_barra_busca)
         menu_editar.addAction(acao_localizar)
@@ -137,36 +183,32 @@ class ABNTHelperApp(QWidget):
         menu_visualizacao.addAction(self.acao_modo_aba)
         grupo_modos.addAction(self.acao_modo_aba)
 
+        menu_visualizacao.addSeparator()
+        self.acao_alternar_tema = QAction("Alternar Tema (Claro/Escuro) 🌗", self)
+        self.acao_alternar_tema.triggered.connect(self.toggle_theme)
+        menu_visualizacao.addAction(self.acao_alternar_tema)
+        self.acao_alternar_tema.setEnabled(HAS_THEME_LIB)
+
         self.tabs = QTabWidget()
         self.aba_conteudo = AbaConteudo(self.documento)
         
-        # --- INÍCIO DA CORREÇÃO (3/4) ---
-        # Conecta o novo sinal da aba_conteudo ao nosso novo slot de navegação
         self.aba_conteudo.topicoSelecionadoParaNavegacao.connect(self._navegar_preview_para_ancora)
-        # --- FIM DA CORREÇÃO (3/4) ---
         
         self.tabs.addTab(self._criar_aba_geral(), "Geral e Pré-Textual")
         self.tabs.addTab(self.aba_conteudo, "Conteúdo Textual (Estrutura)")
         self.tabs.addTab(self._criar_aba_referencias(), "Referências")
-        self.preview_container = self._criar_painel_preview()
+        
+        self.preview_container = self._criar_painel_preview() 
 
-        # --- INÍCIO DA CORREÇÃO ---
-        # 1. Criamos o botão mais discreto
         self.generate_btn = QPushButton("Gerar .docx")
         self.generate_btn.setToolTip("Gerar o documento .docx final")
-        # Adiciona um ícone padrão de "salvar/exportar"
-        self.generate_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DialogSaveButton))
+        self.generate_btn.setIcon(QtGui.QIcon.fromTheme("document-save"))
         
-        # NÃO definimos o setObjectName("GenerateBtn") para que ele use o estilo padrão (discreto)
+        self.generate_btn.setProperty("cssClass", "primary")
         
         self.generate_btn.clicked.connect(self._gerar_documento_final)
         
-        # 2. Adicionamos o botão ao canto superior direito do QTabWidget
         self.tabs.setCornerWidget(self.generate_btn, QtCore.Qt.Corner.TopRightCorner)
-
-        # 3. REMOVEMOS a linha que adicionava o botão ao layout principal
-        # self.main_layout.addWidget(self.generate_btn) # <--- LINHA REMOVIDA
-        # --- FIM DA CORREÇÃO ---
 
         self._reconfigurar_layout() 
 
@@ -195,8 +237,8 @@ class ABNTHelperApp(QWidget):
         brasao_esquerdo_layout.setContentsMargins(0,0,0,0)
         self.cfg_brasao_esquerdo_path = QLineEdit()
         self.cfg_brasao_esquerdo_path.setReadOnly(True)
-        btn_procurar_esquerdo = QPushButton("Procurar...")
-        btn_procurar_esquerdo.setProperty("cssClass", "utility")
+        btn_procurar_esquerdo = QPushButton(QtGui.QIcon.fromTheme("document-open"), "Procurar...")
+        btn_procurar_esquerdo.setProperty("cssClass", "outline-button") 
         brasao_esquerdo_layout.addWidget(self.cfg_brasao_esquerdo_path)
         brasao_esquerdo_layout.addWidget(btn_procurar_esquerdo)
         self.label_brasao_esquerdo = QLabel("Brasão Esquerdo/Único:")
@@ -207,8 +249,8 @@ class ABNTHelperApp(QWidget):
         brasao_direito_layout.setContentsMargins(0,0,0,0)
         self.cfg_brasao_direito_path = QLineEdit()
         self.cfg_brasao_direito_path.setReadOnly(True)
-        btn_procurar_direito = QPushButton("Procurar...")
-        btn_procurar_direito.setProperty("cssClass", "utility")
+        btn_procurar_direito = QPushButton(QtGui.QIcon.fromTheme("document-open"), "Procurar...")
+        btn_procurar_direito.setProperty("cssClass", "outline-button")
         brasao_direito_layout.addWidget(self.cfg_brasao_direito_path)
         brasao_direito_layout.addWidget(btn_procurar_direito)
         self.label_brasao_direito = QLabel("Brasão Direito:")
@@ -278,8 +320,6 @@ class ABNTHelperApp(QWidget):
 
     @QtCore.Slot(str)
     def _atualizar_visibilidade_brasao(self, texto_selecionado):
-        # A LINHA "if self._populando_ui: return" FOI REMOVIDA DAQUI.
-        
         if texto_selecionado == "Nenhum":
             self.label_brasao_esquerdo.setVisible(False)
             self.brasao_esquerdo_widget.setVisible(False)
@@ -338,6 +378,11 @@ class ABNTHelperApp(QWidget):
             splitter.addWidget(self.tabs)
             splitter.addWidget(self.preview_container)
             splitter.setSizes([800, 600]) 
+            
+            # --- NOVO: Conecta o sinal do splitter ---
+            splitter.splitterMoved.connect(self._on_splitter_moved)
+            # --- FIM DA ADIÇÃO ---
+            
             self.main_content_widget = splitter
             self.preview_container.show()
         else:
@@ -347,7 +392,6 @@ class ABNTHelperApp(QWidget):
             self.btn_atualizar_preview.setVisible(True)
             self.main_content_widget = self.tabs
         
-        # Insere o conteúdo principal (splitter ou tabs) no índice 0, com stretch
         self.main_layout.insertWidget(0, self.main_content_widget, 1)
 
     def _criar_aba_referencias(self):
@@ -363,10 +407,12 @@ class ABNTHelperApp(QWidget):
         layout.addWidget(self.lista_referencias)
         
         btn_layout = QHBoxLayout()
-        btn_add = QPushButton("Adicionar")
-        btn_edit = QPushButton("Editar Selecionada")
-        btn_del = QPushButton("Remover Selecionada")
+        
+        btn_add = QPushButton(QtGui.QIcon.fromTheme("list-add"), "Adicionar")
+        btn_edit = QPushButton(QtGui.QIcon.fromTheme("document-edit"), "Editar Selecionada")
+        btn_del = QPushButton(QtGui.QIcon.fromTheme("list-remove"), "Remover Selecionada")
 
+        btn_add.setProperty("cssClass", "primary")
         btn_edit.setProperty("cssClass", "utility")
         btn_del.setProperty("cssClass", "destructive")
 
@@ -390,14 +436,14 @@ class ABNTHelperApp(QWidget):
         busca_layout.setContentsMargins(2, 5, 2, 5)
         self.busca_input = QLineEdit()
         self.busca_input.setPlaceholderText("Buscar na pré-visualização...")
-        btn_buscar_anterior = QPushButton("Anterior")
-        btn_buscar_proximo = QPushButton("Próximo")
+        btn_buscar_anterior = QPushButton(QtGui.QIcon.fromTheme("go-previous"), "Anterior")
+        btn_buscar_proximo = QPushButton(QtGui.QIcon.fromTheme("go-next"), "Próximo")
         self.busca_case_sensitive = QCheckBox("Diferenciar M/m")
-        btn_fechar_busca = QPushButton("Fechar")
+        btn_fechar_busca = QPushButton(QtGui.QIcon.fromTheme("window-close"), "Fechar")
 
-        btn_buscar_anterior.setProperty("cssClass", "utility")
-        btn_buscar_proximo.setProperty("cssClass", "utility")
-        btn_fechar_busca.setProperty("cssClass", "utility") 
+        btn_buscar_anterior.setProperty("cssClass", "outline-button")
+        btn_buscar_proximo.setProperty("cssClass", "outline-button")
+        btn_fechar_busca.setProperty("cssClass", "outline-button") 
 
         busca_layout.addWidget(QLabel("Localizar:"))
         busca_layout.addWidget(self.busca_input)
@@ -407,15 +453,20 @@ class ABNTHelperApp(QWidget):
         busca_layout.addStretch()
         busca_layout.addWidget(btn_fechar_busca)
         layout.addWidget(self.busca_toolbar)
-        self.busca_toolbar.setVisible(False)
+        
+        self.busca_toolbar.setVisible(self.is_search_bar_visible)
         
         self.preview_display = QWebEngineView()
         self.preview_display.setHtml("<html><body><h1>Pré-Visualização</h1><p>A pré-visualização será atualizada aqui.</p></body></html>")
-        self.preview_display.setZoomFactor(0.75)
+        
+        # --- MUDANÇA: Usa a constante de zoom base ---
+        self.preview_display.setZoomFactor(self.BASE_ZOOM_FACTOR)
+        # --- FIM DA MUDANÇA ---
+        
         self.preview_display.loadFinished.connect(self._restaurar_scroll_preview)
         layout.addWidget(self.preview_display, 1)
         
-        self.btn_atualizar_preview = QPushButton("Atualizar Pré-Visualização")
+        self.btn_atualizar_preview = QPushButton(QtGui.QIcon.fromTheme("view-refresh"), "Atualizar Pré-Visualização")
         self.btn_atualizar_preview.clicked.connect(self._atualizar_preview)
         self.btn_atualizar_preview.setVisible(False)
         layout.addWidget(self.btn_atualizar_preview)
@@ -427,12 +478,53 @@ class ABNTHelperApp(QWidget):
         
         return widget
 
+    # --- NOVO SLOT para Zoom Dinâmico ---
+    @QtCore.Slot(int, int)
+    def _on_splitter_moved(self, pos, index):
+        """Ajusta o zoom da preview quando o splitter é movido."""
+        if self.modo_preview != "lado_a_lado" or not isinstance(self.main_content_widget, QSplitter):
+            return
+        
+        splitter = self.main_content_widget
+        sizes = splitter.sizes()
+        
+        # Garante que o splitter está configurado (Editor, Preview)
+        if len(sizes) != 2:
+            return
+            
+        total_width = sum(sizes)
+        if total_width == 0:
+            return
+            
+        current_preview_width = sizes[1]
+        current_ratio = current_preview_width / total_width
+        
+        # Calcula a mudança relativa à proporção neutra
+        if self.NEUTRAL_PREVIEW_RATIO == 0: # Evita divisão por zero
+            return
+            
+        ratio_change = current_ratio / self.NEUTRAL_PREVIEW_RATIO
+        
+        new_zoom = self.BASE_ZOOM_FACTOR * ratio_change
+        
+        # Limita o zoom a valores razoáveis
+        new_zoom = max(0.2, min(new_zoom, 3.0)) 
+        
+        self.preview_display.setZoomFactor(new_zoom)
+    # --- FIM DO NOVO SLOT ---
+
     @QtCore.Slot()
     def _alternar_barra_busca(self):
         is_visible = self.busca_toolbar.isVisible()
-        self.busca_toolbar.setVisible(not is_visible)
-        if not is_visible:
+        new_visibility = not is_visible 
+        
+        self.busca_toolbar.setVisible(new_visibility)
+        if new_visibility:
             self.busca_input.setFocus()
+        
+        self.is_search_bar_visible = new_visibility
+        self.config['ui_settings']['search_bar_visible'] = self.is_search_bar_visible
+        gerenciador_config.salvar_config(self.config)
 
     def _buscar_preview(self, direcao_reversa=False):
         texto_busca = self.busca_input.text()
@@ -469,23 +561,16 @@ class ABNTHelperApp(QWidget):
     def _restaurar_scroll_preview(self):
         self.preview_display.page().runJavaScript(f"window.scrollTo(0, {self.scroll_posicao});")
 
-    # --- INÍCIO DA CORREÇÃO (1/4) ---
     @QtCore.Slot(str)
     def _navegar_preview_para_ancora(self, id_ancora: str):
-        """
-        Rola a pré-visualização (sem recarregar) para a âncora HTML.
-        """
         if not id_ancora:
             return
             
-        # Se a preview estiver em outra aba, muda para ela
         if self.modo_preview == "aba":
             index_preview = self.tabs.indexOf(self.preview_container)
             if index_preview != -1:
                 self.tabs.setCurrentIndex(index_preview)
         
-        # Usa JavaScript para rolar suavemente até o elemento
-        # Isso é muito mais eficiente do que recarregar a URL
         js_code = f"""
         var element = document.getElementById('{id_ancora}');
         if (element) {{
@@ -493,7 +578,6 @@ class ABNTHelperApp(QWidget):
         }}
         """
         self.preview_display.page().runJavaScript(js_code)
-    # --- FIM DA CORREÇÃO (1/4) ---
 
     @QtCore.Slot()
     def _atualizar_preview(self):
@@ -646,18 +730,10 @@ class ABNTHelperApp(QWidget):
             self._salvar_projeto()
         return True
 
-    # --- INÍCIO DA CORREÇÃO (2/4) ---
     @QtCore.Slot()
     def _on_editor_modificado(self):
-        """
-        Slot intermediário que verifica se a mudança no editor foi
-        feita pelo usuário ou pelo carregamento de um capítulo.
-        """
-        # Só marca como modificado (e dispara a atualização)
-        # se não estivermos no meio de um carregamento de capítulo.
         if not self.aba_conteudo._carregando_capitulo:
             self._marcar_modificado()
-    # --- FIM DA CORREÇÃO (2/4) ---
 
     def _conectar_sinais_modificacao(self):
         self.cfg_tipo.currentTextChanged.connect(self._marcar_modificado)
@@ -676,11 +752,7 @@ class ABNTHelperApp(QWidget):
         self.resumo_input.textChanged.connect(self._marcar_modificado)
         self.keywords_input.textChanged.connect(self._marcar_modificado)
 
-        # --- INÍCIO DA CORREÇÃO (4/4) ---
-        # MUDANÇA: Em vez de conectar direto no _marcar_modificado,
-        # conectamos no nosso filtro _on_editor_modificado.
         self.aba_conteudo.editor_capitulo.textChanged.connect(self._on_editor_modificado)
-        # --- FIM DA CORREÇÃO (4/4) ---
         
         self.aba_conteudo.arvore_capitulos.estruturaAlterada.connect(self._marcar_modificado)
         self.aba_conteudo.arvore_capitulos.itemChanged.connect(self._marcar_modificado)
@@ -742,8 +814,6 @@ class ABNTHelperApp(QWidget):
             QMessageBox.warning(self, "Erro", "Título e Autores são campos obrigatórios.")
             return
         
-        # --- CORREÇÃO 1: NOME DO ARQUIVO ---
-        
         titulo_projeto = self.documento.titulo
         if titulo_projeto:
             nome_sanitizado = re.sub(r'[<>:"/\\|?*]', '', titulo_projeto)
@@ -756,26 +826,16 @@ class ABNTHelperApp(QWidget):
             
         nome_arquivo_sugerido = f"{nome_sanitizado}.docx"
         
-        # --- CORREÇÃO 2: LOCAL DE SALVAMENTO ---
-        
-        # Define o diretório padrão (será usado se o projeto .abnf ainda não foi salvo)
         diretorio_sugerido = "" 
         
-        # Verifica se o projeto .abnf já foi salvo em algum lugar
         if self.caminho_projeto_atual:
-            # Se sim, pega o diretório (pasta) onde o .abnf está
             diretorio_sugerido = os.path.dirname(self.caminho_projeto_atual)
             
-        # Combina o diretório sugerido com o nome de arquivo sugerido
-        # (ex: "C:/Meus Documentos/Projetos" + "Meu TCC.docx")
         caminho_sugerido_completo = os.path.join(diretorio_sugerido, nome_arquivo_sugerido)
         
-        # --- FIM DAS CORREÇÕES ---
-        
-        # Usa o caminho completo sugerido no diálogo
         filename, _ = QFileDialog.getSaveFileName(self, "Salvar Documento", 
-                                                  caminho_sugerido_completo, 
-                                                  "Word Documents (*.docx)")
+                                                    caminho_sugerido_completo, 
+                                                    "Word Documents (*.docx)")
         
         if not filename: return
         try:
@@ -820,22 +880,16 @@ class ABNTHelperApp(QWidget):
     def iniciar_novo_projeto_com_modelo(self, nome_modelo):
         if not self._verificar_alteracoes_nao_salvas(): return
         
-        # Limpa o estado antigo
         gerenciador_recuperacao.limpar_recuperacao(self.caminho_projeto_atual)
         if self.autosave_timer.isActive(): self.autosave_timer.stop()
         
         self.documento = DocumentoABNT()
         
-        # --- INÍCIO DA CORREÇÃO ---
-        # Pega a nova estrutura (lista de dicionários)
         estrutura_data_list = get_estrutura_por_nome(nome_modelo)
         
-        # Usa a função Capitulo.from_dict (que já existe em documento.py)
-        # para construir recursivamente os capítulos e seus filhos.
         for capitulo_data in estrutura_data_list:
             novo_capitulo = Capitulo.from_dict(capitulo_data) 
             self.documento.estrutura_textual.adicionar_filho(novo_capitulo)
-        # --- FIM DA CORREÇÃO ---
 
         self.caminho_projeto_atual = None
         self.gerenciador_projeto.fechar_projeto()
@@ -862,9 +916,15 @@ if __name__ == '__main__':
 
     app = QApplication(sys.argv)
     
-    # --- MUDANÇA (Aplica o Stylesheet global) ---
-    app.setStyleSheet(stylesheet.get_style_sheet())
-    # --------------------------------------------
+    config = gerenciador_config.carregar_config()
+    initial_theme = config.get('ui_settings', {}).get('theme', 'light') # Padrão 'light'
+    
+    if HAS_THEME_LIB:
+        app_style = qdarktheme.load_stylesheet(initial_theme) # Usa o tema salvo
+        app_style += stylesheet.get_style_sheet()
+        app.setStyleSheet(app_style)
+    else:
+        app.setStyleSheet(stylesheet.get_style_sheet())
     
     while True:
         gerenciador_recuperacao.setup_diretorios()

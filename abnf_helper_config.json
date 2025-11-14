@@ -3,7 +3,7 @@
         {
             "path": "C:\\Users\\Matheus\\Desktop\\Arquivos de teste do ABNT helper\\geração de documentos e brasões.abnf",
             "name": "geração de documentos e brasões.abnf",
-            "timestamp": 1763116308.280693
+            "timestamp": 1763124664.879492
         },
         {
             "path": "C:\\Users\\Matheus\\Desktop\\Arquivos de teste do ABNT helper\\AAAAAAAA.abnf",
@@ -53,5 +53,9 @@
     "backup": {
         "backup_on_save_enabled": true,
         "max_backups_per_project": 10
+    },
+    "ui_settings": {
+        "theme": "light",
+        "search_bar_visible": true
     }
 }
