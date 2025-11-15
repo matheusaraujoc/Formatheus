@@ -11,6 +11,7 @@
 
 import sys
 import os
+os.environ['QT_API'] = 'PySide6'
 import traceback
 import numpy as np
 import json 
@@ -33,7 +34,7 @@ from PySide6.QtGui import (
     QAction, QKeySequence 
 )
 
-from matplotlib.backends.backend_qt5agg import (
+from matplotlib.backends.backend_qtagg import (  # MODIFICADO para 'qtagg'
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar
 )
@@ -1267,6 +1268,44 @@ class Grafico3DDialog(QDialog):
 
     def get_dados_grafico_3d(self) -> Grafico3D:
         return self.grafico_final
+    
+    def done(self, result):
+        """
+        Sobrescreve o método 'done' do QDialog para limpar os recursos do Matplotlib
+        antes de fechar, prevenindo vazamentos de memória.
+        """
+        print("Limpando recursos do Gráfico 3D...")
+        
+        # Para o timer de rotação se estiver ativo
+        if self.rotation_timer.isActive():
+            self.rotation_timer.stop()
+        
+        try:
+            if self.fig:
+                # Limpa todos os eixos da figura
+                self.fig.clear() 
+                # Fecha a figura no estado global do pyplot (CRUCIAL)
+                plt.close(self.fig)
+            if self.canvas:
+                # Remove o widget da interface
+                self.canvas.close() 
+                # Marca para exclusão segura
+                self.canvas.deleteLater()
+            if self.toolbar:
+                self.toolbar.close()
+                self.toolbar.deleteLater()
+                
+            self.fig = None
+            self.canvas = None
+            self.toolbar = None
+            
+        except Exception as e:
+            # Mesmo se falhar, não impede o fechamento do diálogo
+            print(f"Erro ao limpar recursos do Matplotlib 3D: {e}")
+        
+        # Chama a implementação original para fechar o diálogo
+        super().done(result)
+    # --- FIM DA CORREÇÃO ---
 
 
 # --- INICIALIZADOR STANDALONE (Para testes) ---

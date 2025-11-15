@@ -15,6 +15,7 @@
 
 import sys
 import os
+os.environ['QT_API'] = 'PySide6'
 import traceback
 import pandas as pd
 import numpy as np
@@ -37,13 +38,14 @@ from PySide6.QtGui import (
 )
 
 # Import matplotlib for Qt
-from matplotlib.backends.backend_qt5agg import (
+from matplotlib.backends.backend_qtagg import (  # MODIFICADO para o backend genérico 'qtagg'
     FigureCanvasQTAgg as FigureCanvas,
     NavigationToolbar2QT as NavigationToolbar
 )
 from matplotlib.ticker import MultipleLocator
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+from matplotlib import colormaps # NOVO: Importação mais segura para colormaps
 
 # Importa a classe de dados do documento
 from documento import Grafico
@@ -1198,12 +1200,17 @@ class ChartDialog(QDialog):
             else: # Boxplot
                 bp = ax.boxplot(data_to_plot, patch_artist=True)
                 ax.set_xticklabels(y_cols)
+                
+                # --- INÍCIO DA CORREÇÃO ---
                 # Tenta colorir as caixas (opcional)
-                colors = plt.cm.get_cmap('Pastel1', len(y_cols))
-                for patch, color in zip(bp['boxes'], colors(range(len(y_cols)))):
+                # MODIFICADO: Usa a API orientada a objetos (colormaps) em vez do plt.cm
+                cmap = colormaps.get_cmap('Pastel1') 
+                colors = cmap(np.linspace(0, 1, len(y_cols)))
+                for patch, color in zip(bp['boxes'], colors):
+                # --- FIM DA CORREÇÃO ---
                     patch.set_facecolor(color)
                     patch.set_alpha(0.7)
-                    
+                        
         elif plot_type == 'Pizza':
             x_labels = df[s['label_col']]
             y_col = y_cols[0]
@@ -1219,7 +1226,6 @@ class ChartDialog(QDialog):
             if not s['show_data_labels']:
                 for t in autotexts: t.set_visible(False)
             ax.axis('equal')
-    # --- FIM DA MODIFICAÇÃO (v54) ---
             
     def _plot_custom_data(self, ax, s):
         series_list = s['series_data']; plot_type = s['type']
@@ -1458,3 +1464,35 @@ class ChartDialog(QDialog):
     def get_dados_grafico(self) -> Grafico:
         """Retorna o objeto Grafico finalizado para a AbaConteudo."""
         return self.grafico_final
+    
+    def done(self, result):
+        """
+        Sobrescreve o método 'done' do QDialog para limpar os recursos do Matplotlib
+        antes de fechar, prevenindo vazamentos de memória.
+        """
+        print("Limpando recursos do Matplotlib...")
+        try:
+            if self.fig:
+                # Limpa todos os eixos da figura
+                self.fig.clear() 
+                # Fecha a figura no estado global do pyplot (CRUCIAL)
+                plt.close(self.fig)
+            if self.canvas:
+                # Remove o widget da interface
+                self.canvas.close() 
+                # Marca para exclusão segura
+                self.canvas.deleteLater()
+            if self.toolbar:
+                self.toolbar.close()
+                self.toolbar.deleteLater()
+                
+            self.fig = None
+            self.canvas = None
+            self.toolbar = None
+            
+        except Exception as e:
+            # Mesmo se falhar, não impede o fechamento do diálogo
+            print(f"Erro ao limpar recursos do Matplotlib: {e}")
+        
+        # Chama a implementação original para fechar o diálogo
+        super().done(result)
