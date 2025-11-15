@@ -8,6 +8,11 @@
 # 3. Atualizado regex e funções de estimativa/renderização.
 # 4. Adicionado _renderizar_grafico_3d_html.
 #
+# ATUALIZAÇÃO (vX.X - Formatação de Texto):
+# 1. Adicionado _processar_markdown_para_html para converter **, * e _.
+# 2. Atualizado _adicionar_paragrafo_quebravel para usar o processador de markdown.
+# 3. Atualizado _renderizar_resumo_html e _renderizar_lista_html.
+#
 
 import os
 import re
@@ -74,8 +79,19 @@ class GeradorHTMLPreview:
         """
         Calcula a altura real (em cm) que um parágrafo ocupará,
         medindo a largura de cada palavra E quebrando palavras longas.
+        Marcadores de markdown são removidos antes da medição.
         """
-        palavras = texto.strip().split()
+        
+        # --- INÍCIO DA CORREÇÃO (vX.X - Itálico com '~') ---
+        # Remove os marcadores de markdown ANTES de medir
+        texto_limpo = re.sub(r"\*\*(?P<conteudo>[^*]+)\*\*", r"\g<conteudo>", texto)
+        # Alterado de '*' para '~'
+        texto_limpo = re.sub(r"~(?P<conteudo>[^~]+)~", r"\g<conteudo>", texto_limpo)
+        texto_limpo = re.sub(r"_(?P<conteudo>[^_]+)_", r"\g<conteudo>", texto_limpo)
+        
+        palavras = texto_limpo.strip().split() # Mede o texto limpo
+        # --- FIM DA CORREÇÃO ---
+
         if not palavras: return 0.0
 
         linhas = 1
@@ -85,6 +101,7 @@ class GeradorHTMLPreview:
         
         for palavra in palavras:
             try:
+                # Mede a palavra limpa
                 bbox = self.font_medidor.getbbox(palavra); largura_palavra = bbox[2] - bbox[0]
             except:
                 largura_palavra = len(palavra) * (self.LARGURA_CHAR_MEDIO_PX * 0.9) # fallback
@@ -97,6 +114,7 @@ class GeradorHTMLPreview:
                 linhas += 1
                 largura_linha_atual = largura_palavra 
             
+            # Lógica para quebrar palavras muito longas
             while largura_linha_atual > self.LARGURA_CONTEUDO_PX:
                 linhas += 1
                 largura_linha_atual -= self.LARGURA_CONTEUDO_PX
@@ -308,6 +326,7 @@ class GeradorHTMLPreview:
         self.conteudo_pagina_atual.append(html)
         self.altura_restante -= altura_necessaria
 
+    # --- MODIFICADO (vX.X - Formatação de Texto) ---
     def _adicionar_paragrafo_quebravel(self, texto_paragrafo, is_continuacao=False):
         self.classe_pagina_atual = 'pagina'
         if not self.conteudo_pagina_atual:
@@ -325,7 +344,10 @@ class GeradorHTMLPreview:
             
             if altura_total_texto_restante <= self.altura_restante:
                 base_class = "corpo-texto" if not is_continuacao else "paragrafo-continuado"
-                self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_restante}</p>')
+                # --- NOVO: Processa markdown para HTML ---
+                texto_html = self._processar_markdown_para_html(texto_restante)
+                self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_html}</p>')
+                # --- FIM DA MODIFICAÇÃO ---
                 self.altura_restante -= altura_total_texto_restante
                 texto_restante = ""
             
@@ -366,7 +388,10 @@ class GeradorHTMLPreview:
                     texto_restante = " ".join(palavras_paragrafo[indice_quebra:])
                 
                 base_class = "corpo-texto" if not is_continuacao else "paragrafo-continuado"
-                self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_para_pagina_atual}</p>')
+                # --- NOVO: Processa markdown para HTML ---
+                texto_html = self._processar_markdown_para_html(texto_para_pagina_atual)
+                self.conteudo_pagina_atual.append(f'<p class="{base_class}">{texto_html}</p>')
+                # --- FIM DA MODIFICAÇÃO ---
                 
                 altura_consumida = self._calcular_altura_paragrafo(texto_para_pagina_atual, is_continuacao)
                 self.altura_restante -= altura_consumida
@@ -380,7 +405,11 @@ class GeradorHTMLPreview:
         self._adicionar_elemento_bloco(f'<p style="text-align: center;"><strong>{self.doc_abnt.titulo.upper()}</strong></p><br>', ALTURA_LINHA_TEXTO * 2)
         self._adicionar_elemento_bloco(f'<p style="text-align: center;">{autores_html}</p><br>', ALTURA_LINHA_TEXTO * 2)
         self._adicionar_elemento_bloco(f'<p><strong>Resumo</strong></p>', ALTURA_LINHA_TEXTO)
+        
+        # --- MODIFICADO: Agora usa o _adicionar_paragrafo_quebravel que já processa o markdown ---
         self._adicionar_paragrafo_quebravel(self.doc_abnt.resumo)
+        # --- FIM DA MODIFICAÇÃO ---
+        
         self._adicionar_elemento_bloco(f'<br><p><strong>Palavras-chave:</strong> {self.doc_abnt.palavras_chave.replace(";", ".")}.</p>', ALTURA_LINHA_TEXTO * 2)
 
     def gerar_html(self) -> str:
@@ -707,6 +736,7 @@ class GeradorHTMLPreview:
             return "lista-simbolos"
         return ""
 
+    # --- MODIFICADO (vX.X - Formatação de Texto) ---
     def _renderizar_lista_html(self, lista_obj) -> str: # O tipo é ListaABNT
         """Gera o HTML para uma ListaABNT."""
         html_final = "<div>"
@@ -726,7 +756,9 @@ class GeradorHTMLPreview:
             html_lista = f'<{tag} class="{classe_css}">'
             
             for i, item_filho in enumerate(item_pai.filhos):
-                texto_item = item_filho.texto
+                # --- NOVO: Processa markdown para HTML ---
+                texto_item = self._processar_markdown_para_html(item_filho.texto)
+                # --- FIM DA MODIFICAÇÃO ---
                 
                 if lista_obj.tipo_enumeracao == "Numérica (Seção)":
                     numero_item = f"{prefixo_numerico}{i+1}."
@@ -764,8 +796,12 @@ class GeradorHTMLPreview:
         </div>
         <div><p>{cfg.cidade.upper()}</p><p>{cfg.ano}</p></div>"""
 
+    # --- MODIFICADO (vX.X - Formatação de Texto) ---
     def _renderizar_resumo_html(self):
-        return f"""<h1>RESUMO</h1><p class="resumo-paragrafo">{self.doc_abnt.resumo}</p><p><br></p><p class="resumo-titulo-palavras-chave">Palavras-chave: <span style="font-weight: normal;">{self.doc_abnt.palavras_chave.replace(';', '.')}.</span></p>"""
+        # --- NOVO: Processa markdown para HTML ---
+        texto_resumo_html = self._processar_markdown_para_html(self.doc_abnt.resumo)
+        # --- FIM DA MODIFICAÇÃO ---
+        return f"""<h1>RESUMO</h1><p class="resumo-paragrafo">{texto_resumo_html}</p><p><br></p><p class="resumo-titulo-palavras-chave">Palavras-chave: <span style="font-weight: normal;">{self.doc_abnt.palavras_chave.replace(';', '.')}.</span></p>"""
 
     def _renderizar_sumario_html(self):
         html = "<h1>SUMÁRIO</h1>"
@@ -844,3 +880,24 @@ class GeradorHTMLPreview:
             <p class="formula-legenda">Equação {formula.numero} – {formula.legenda}</p>
         </div>"""
         return html
+
+    # --- NOVO (vX.X - Formatação de Texto): Processador Markdown ---
+    def _processar_markdown_para_html(self, texto: str) -> str:
+        """
+        Converte marcadores de markdown simples (**negrito**, ~italico~, _sublinhado_)
+        em tags HTML.
+        """
+        if not texto:
+            return ""
+        
+        # 1. Negrito (**texto**)
+        # Usamos [^...]+ para "non-greedy" e para não cruzar marcadores
+        texto = re.sub(r"\*\*(?P<conteudo>[^*]+)\*\*", r"<strong>\g<conteudo></strong>", texto)
+        
+        # 2. Itálico (~texto~)
+        texto = re.sub(r"~(?P<conteudo>[^~]+)~", r"<i>\g<conteudo></i>", texto)
+        
+        # 3. Sublinhado (_texto_)
+        texto = re.sub(r"_(?P<conteudo>[^_]+)_", r"<u>\g<conteudo></u>", texto)
+        
+        return texto

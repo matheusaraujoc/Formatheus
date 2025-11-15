@@ -1,5 +1,10 @@
 # normas_abnt.py
 # Descrição: Versão corrigida para garantir cor preta nos títulos e melhor controle de espaçamento.
+#
+# ATUALIZAÇÃO (vX.X - Formatação de Texto):
+# 1. Modificado 'aplicar_estilo_paragrafo_normal' para aceitar 'texto=None'.
+# 2. Modificado 'aplicar_estilo_resumo' para aceitar 'texto=None'.
+#
 
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
@@ -50,7 +55,11 @@ class MotorNormasABNT:
         p_resumo_titulo.paragraph_format.line_spacing = self.ESPAÇAMENTO_SIMPLES
         
         p_resumo = doc.add_paragraph()
-        self.aplicar_estilo_resumo(p_resumo, self.doc_abnt.resumo)
+        # --- INÍCIO DA MODIFICAÇÃO (vX.X - Formatação) ---
+        # Aplica o estilo ao parágrafo, mas o texto será adicionado depois
+        # (pelo _renderizar_paragrafo_com_markdown no gerador_docx)
+        self.aplicar_estilo_resumo(p_resumo)
+        # --- FIM DA MODIFICAÇÃO ---
         
         p_kw = doc.add_paragraph()
         run_kw = p_kw.add_run("Palavras-chave: ")
@@ -121,14 +130,19 @@ class MotorNormasABNT:
             section.left_margin = self.MARGEM_ESQUERDA
             section.right_margin = self.MARGEM_DIREITA
             
-    def aplicar_estilo_paragrafo_normal(self, paragrafo, texto):
+    # --- INÍCIO DA MODIFICAÇÃO (vX.X - Formatação) ---
+    def aplicar_estilo_paragrafo_normal(self, paragrafo, texto=None):
         paragrafo.style = 'Normal'
         paragrafo.paragraph_format.first_line_indent = self.RECUO_PRIMEIRA_LINHA
         paragrafo.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-        run = paragrafo.add_run(texto)
-        run.font.name = self.FONTE_PADRAO
-        run.font.color.rgb = self.COR_FONTE_PADRAO
         
+        # Só adiciona o texto se ele for fornecido (para compatibilidade antiga)
+        if texto:
+            run = paragrafo.add_run(texto)
+            run.font.name = self.FONTE_PADRAO
+            run.font.color.rgb = self.COR_FONTE_PADRAO
+    # --- FIM DA MODIFICAÇÃO ---
+            
     def aplicar_estilo_titulo_secao(self, doc, numero, titulo_texto, nivel=1):
         if self.is_artigo:
             titulo_formatado = f"{numero} {titulo_texto}" if numero else titulo_texto.upper()
@@ -151,12 +165,17 @@ class MotorNormasABNT:
         paragrafo.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
         paragrafo.add_run(texto)
     
-    def aplicar_estilo_resumo(self, paragrafo, texto):
+    # --- INÍCIO DA MODIFICAÇÃO (vX.X - Formatação) ---
+    def aplicar_estilo_resumo(self, paragrafo, texto=None):
         paragrafo.style = 'Normal'
         paragrafo.paragraph_format.line_spacing = self.ESPAÇAMENTO_SIMPLES
         paragrafo.paragraph_format.first_line_indent = 0
         paragrafo.alignment = WD_PARAGRAPH_ALIGNMENT.JUSTIFY
-        paragrafo.add_run(texto)
+        
+        # Só adiciona o texto se ele for fornecido (para compatibilidade antiga)
+        if texto:
+            paragrafo.add_run(texto)
+    # --- FIM DA MODIFICAÇÃO ---
         
     def aplicar_estilo_referencia(self, paragrafo, texto_formatado):
         paragrafo.style = 'Referencias'

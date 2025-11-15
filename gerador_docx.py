@@ -7,6 +7,12 @@
 # 2. Importado Grafico3D e adicionado contador_graficos_3d.
 # 3. Atualizado regex e adicionado método _renderizar_grafico_3d.
 #
+# ATUALIZAÇÃO (vX.X - Formatação de Texto):
+# 1. Adicionado _renderizar_paragrafo_com_markdown para processar **, * e _.
+# 2. Atualizado _renderizar_secoes_recursivamente para usar o novo renderizador.
+# 3. Atualizado _renderizar_resumo para usar o novo renderizador.
+# 4. Atualizado _renderizar_lista para usar o novo renderizador.
+#
 
 import os
 import re
@@ -27,7 +33,7 @@ except ImportError:
 
 # --- INÍCIO DA MODIFICAÇÃO (v47) ---
 from documento import (DocumentoABNT, Capitulo, ItemLista, ListaABNT, 
-                       Grafico, Grafico3D) # <--- ADICIONADO Grafico3D
+                     Grafico, Grafico3D) # <--- ADICIONADO Grafico3D
 # --- FIM DA MODIFICAÇÃO ---
 from normas_abnt import MotorNormasABNT
 
@@ -183,8 +189,14 @@ class GeradorDOCX:
                         paragrafos = bloco_de_texto.strip().split('\n')
                         for texto_paragrafo in paragrafos:
                             if texto_paragrafo.strip():
+                                # --- INÍCIO DA MODIFICAÇÃO (vX.X - Formatação) ---
                                 p = self.doc.add_paragraph()
-                                self.regras.aplicar_estilo_paragrafo_normal(p, texto_paragrafo)
+                                # Aplica estilos de parágrafo (recuo, espaçamento)
+                                # Assumindo que pode ser chamada sem o texto
+                                self.regras.aplicar_estilo_paragrafo_normal(p)
+                                # Renderiza o texto com formatação markdown
+                                self._renderizar_paragrafo_com_markdown(p, texto_paragrafo.strip())
+                                # --- FIM DA MODIFICAÇÃO ---
                     
                     if idx + 3 < len(partes): 
                         tipo_obj = partes[idx+1]
@@ -249,7 +261,7 @@ class GeradorDOCX:
                         idx += 4 # Avança (Texto, Tipo, Titulo, Comando)
                     else:
                         idx += 1 # Avança o último bloco de texto
-                
+            
             self._renderizar_secoes_recursivamente(no_filho, prefixo_numeracao=f"{numero_completo}.")
 
     def _renderizar_tabela(self, tabela_obj):
@@ -421,9 +433,9 @@ class GeradorDOCX:
         """
         if tipo == "Híbrida (ABNT)":
             if nivel == 1: return f"{self._get_char_alfabetico(indice)})", "" # a)
-            if nivel == 2: return f"{indice + 1})", ""                       # 1)
+            if nivel == 2: return f"{indice + 1})", ""                 # 1)
             if nivel == 3: return f"{self._get_char_romano(indice)}", ""     # i)
-            return "-", ""                                                   # -
+            return "-", ""                                               # -
         
         if tipo == "Numérica (Seção)":
             num_atual = f"{prefixo_num}{indice + 1}."
@@ -482,19 +494,72 @@ class GeradorDOCX:
                 p.paragraph_format.first_line_indent = -Cm(recuo_total_cm - recuo_marcador_cm)
                 
                 if lista_obj.tipo_enumeracao == "Numérica (Seção)":
-                    run = p.add_run(f"{marcador} {item_filho.texto}")
-                    self.regras._aplicar_formatacao_run(run)
+                    # --- INÍCIO DA MODIFICAÇÃO (vX.X - Formatação) ---
+                    # Adiciona o marcador primeiro
+                    run_marcador = p.add_run(f"{marcador} ")
+                    self.regras._aplicar_formatacao_run(run_marcador)
+                    # Renderiza o texto com markdown
+                    self._renderizar_paragrafo_com_markdown(p, item_filho.texto)
+                    # --- FIM DA MODIFICAÇÃO ---
                 else:
                     run_marcador = p.add_run(f"{marcador}\t")
                     self.regras._aplicar_formatacao_run(run_marcador)
                     
-                    run_texto = p.add_run(item_filho.texto)
-                    self.regras._aplicar_formatacao_run(run_texto)
+                    # --- INÍCIO DA MODIFICAÇÃO (vX.X - Formatação) ---
+                    # Renderiza o texto do item com markdown
+                    self._renderizar_paragrafo_com_markdown(p, item_filho.texto)
+                    # --- FIM DA MODIFICAÇÃO ---
                 
                 render_itens_recursivo(item_filho, nivel + 1, proximo_prefixo)
 
         render_itens_recursivo(lista_obj.raiz, 1, "")
         
+    # --- INÍCIO: NOVO MÉTODO PARA RENDERIZAR MARKDOWN (vX.X) ---
+    def _renderizar_paragrafo_com_markdown(self, p, texto):
+        """
+        Processa uma string de texto contendo markdown simples (**, ~, _)
+        e a adiciona a um objeto de parágrafo (p) como múltiplos 'runs'
+        formatados.
+        """
+        # Regex para 'fatiar' a string pelos marcadores, mantendo os marcadores
+        # Alterado de '*' para '~'
+        partes = re.split(r'(\*\*|~|_)', texto)
+        
+        is_bold = False
+        is_italic = False
+        is_underline = False
+        
+        for parte in partes:
+            if not parte:
+                continue
+                
+            if parte == '**':
+                is_bold = not is_bold
+            elif parte == '~': # Alterado de '*' para '~'
+                is_italic = not is_italic
+            elif parte == '_':
+                is_underline = not is_underline
+            else:
+                # É um bloco de texto normal
+                run = p.add_run(parte)
+                
+                # Aplica a formatação base (Fonte, Tamanho, Cor)
+                if hasattr(self.regras, '_aplicar_formatacao_run'):
+                    self.regras._aplicar_formatacao_run(run)
+                else:
+                    # Fallback seguro
+                    if hasattr(self.regras, 'FONTE_PADRAO'):
+                        run.font.name = self.regras.FONTE_PADRAO
+                    if hasattr(self.regras, 'TAMANHO_FONTE_PADRAO'):
+                        run.font.size = self.regras.TAMANHO_FONTE_PADRAO
+                    if hasattr(self.regras, 'COR_FONTE_PADRAO'):
+                        run.font.color.rgb = self.regras.COR_FONTE_PADRAO
+                
+                # Aplica formatação de markdown
+                run.bold = is_bold
+                run.italic = is_italic
+                run.underline = is_underline
+
     def _set_page_numbering(self, section):
         section.header.is_linked_to_previous = False
         header_p = section.header.paragraphs[0]
@@ -573,7 +638,7 @@ class GeradorDOCX:
         p_natureza = self.doc.add_paragraph()
         p_natureza.paragraph_format.space_before = Pt(90)
         texto_natureza = (f"{cfg.tipo_trabalho} apresentado ao curso de {cfg.modalidade_curso} em {cfg.curso} da {cfg.instituicao}, "
-                            f"como requisito parcial para a obtenção do título de {cfg.titulo_pretendido}.")
+                          f"como requisito parcial para a obtenção do título de {cfg.titulo_pretendido}.")
         self.regras.aplicar_estilo_natureza_trabalho(p_natureza, texto_natureza)
         
         p_orientador = self.doc.add_paragraph()
@@ -589,8 +654,13 @@ class GeradorDOCX:
     def _renderizar_resumo(self):
         self.regras.aplicar_estilo_titulo_secao(self.doc, numero="", titulo_texto="RESUMO")
         
+        # --- INÍCIO DA MODIFICAÇÃO (vX.X - Formatação) ---
         p_resumo = self.doc.add_paragraph()
-        self.regras.aplicar_estilo_resumo(p_resumo, self.doc_abnt.resumo)
+        # Assumindo que aplicar_estilo_resumo(p) aplica estilos de parágrafo
+        self.regras.aplicar_estilo_resumo(p_resumo)
+        # Renderiza o texto com markdown
+        self._renderizar_paragrafo_com_markdown(p_resumo, self.doc_abnt.resumo)
+        # --- FIM DA MODIFICAÇÃO ---
         
         p_resumo.paragraph_format.first_line_indent = self.regras.RECUO_PRIMEIRA_LINHA
 

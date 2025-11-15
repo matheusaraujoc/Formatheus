@@ -36,44 +36,85 @@ import os
 
 class MarcadorHighlighter(QSyntaxHighlighter):
     """
-    Realça a sintaxe dos marcadores {{...}} dentro do QTextEdit.
+    Realça a sintaxe dos marcadores {{...}} e formatação (negrito,
+    itálico, sublinhado) dentro do QTextEdit, e "esconde" os marcadores **, ~, _
     """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.highlight_rules = []
+        self.highlight_rules_text_format = []
+        self.formats = {}
         
-        # --- REGEX ATUALIZADO (v47) ---
+        # Formatos para os marcadores (os **, ~, _) - torná-los "invisíveis"
+        self.invisible_format = QTextCharFormat()
+        # Define a cor do texto para ser a mesma do fundo do editor (branco)
+        self.invisible_format.setForeground(QColor(Qt.GlobalColor.white)) 
+        self.invisible_format.setFontFixedPitch(True)
+
+        # --- 1. Formatação de Texto (Negrito, Itálico, Sublinhado) ---
+        
+        # REGRA 1: Negrito (**)
+        format_negrito = QTextCharFormat()
+        format_negrito.setFontWeight(QFont.Weight.Bold)
+        self.highlight_rules_text_format.append(
+            (re.compile(r"(\*\*)(.+?)(\*\*)"), format_negrito)
+        )
+
+        # REGRA 2: Itálico (~)
+        format_italico = QTextCharFormat()
+        format_italico.setFontItalic(True)
+        self.highlight_rules_text_format.append(
+            (re.compile(r"(~)(.+?)(~)"), format_italico)
+        )
+
+        # REGRA 3: Sublinhado (_)
+        format_sublinhado = QTextCharFormat()
+        format_sublinhado.setFontUnderline(True)
+        self.highlight_rules_text_format.append(
+            (re.compile(r"(_)(.+?)(_)"), format_sublinhado)
+        )
+
+        # --- 2. Marcadores de Ativos ({{...}}) ---
         self.marker_regex = re.compile(
             r"(\{\{(Tabela|Figura|Grafico|Grafico3D|Formula|Lista):([^}]+)\}\})|"
             r"(\{\{(QUEBRA_PAGINA|PAGINA_EM_BRANCO)\}\})"
         )
-        # --- FIM DA ATUALIZAÇÃO ---
 
-        self.formats = {}
-        # --- CORES ATUALIZADAS (v47) ---
         base_colors = {
             "Tabela": "#0078d4", "Figura": "#008a00", "Grafico": "#8a008a",
-            "Grafico3D": "#008080", # <-- Nova cor (Teal)
-            "Formula": "#d13438", "Lista": "#b45f06", "QUEBRA_PAGINA": "#a0a0a0",
-            "PAGINA_EM_BRANCO": "#a0a0a0",
+            "Grafico3D": "#008080", "Formula": "#d13438", "Lista": "#b45f06",
+            "QUEBRA_PAGINA": "#a0a0a0", "PAGINA_EM_BRANCO": "#a0a0a0",
         }
-        # --- FIM DA ATUALIZAÇÃO ---
 
         for tipo, cor_hex in base_colors.items():
-            format = QTextCharFormat()
-            format.setForeground(QColor(cor_hex))
-            format.setFontWeight(QFont.Weight.Bold)
-            # format.setBackground(QColor("#f0f0f0")) 
-            self.formats[tipo] = format
+            format_marcador = QTextCharFormat()
+            format_marcador.setForeground(QColor(cor_hex))
+            format_marcador.setFontWeight(QFont.Weight.Bold)
+            self.formats[tipo] = format_marcador
 
     def highlightBlock(self, text):
         """Aplica a formatação ao bloco de texto atual."""
+        
+        # Resetar formato padrão para o bloco
+        self.setFormat(0, len(text), QTextCharFormat())
+
+        # 1. Aplica formatação de texto (Negrito, Itálico, Sublinhado)
+        for pattern, text_format in self.highlight_rules_text_format:
+            for match in pattern.finditer(text):
+                # Aplicar formato "invisível" aos marcadores (Grupo 1 e Grupo 3)
+                self.setFormat(match.start(1), match.end(1) - match.start(1), self.invisible_format)
+                self.setFormat(match.start(3), match.end(3) - match.start(3), self.invisible_format)
+                
+                # Aplicar o formato de texto real (negrito/itálico/sublinhado) ao conteúdo (Grupo 2)
+                self.setFormat(match.start(2), match.end(2) - match.start(2), text_format)
+
+        # 2. Aplica formatação de marcadores de ativos ({{...}})
+        # Esta regra sobrepõe as anteriores
         for match in self.marker_regex.finditer(text):
             if match.group(1): # É um marcador de ativo (ex: {{Figura:Nome}})
                 tipo = match.group(2) # O tipo (Figura)
                 if tipo in self.formats:
                     self.setFormat(match.start(1), match.end(1) - match.start(1), self.formats[tipo])
-            
+
             elif match.group(4): # É um marcador de comando (ex: {{QUEBRA_PAGINA}})
                 tipo = match.group(5) # O tipo (QUEBRA_PAGINA)
                 if tipo in self.formats:
@@ -200,16 +241,21 @@ class AbaConteudo(QWidget):
         Atualiza os ícones personalizados (assets) com base no tema.
         Chamado pelo main_app.py.
         """
-        if is_dark:
-            self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo-white.png"))
-            self.btn_refazer.setIcon(QtGui.QIcon("assets/icons/redo-white.png"))
-            self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break-white.png"))
-            self.btn_pagina_em_branco.setIcon(QtGui.QIcon("assets/icons/blank_page-white.png"))
-        else:
-            self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo.png"))
-            self.btn_refazer.setIcon(QtGui.QIcon("assets/icons/redo.png"))
-            self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break.png"))
-            self.btn_pagina_em_branco.setIcon(QtGui.QIcon("assets/icons/blank_page.png"))
+        suffix = "-white" if is_dark else ""
+        
+        # Botões de Desfazer/Refazer
+        self.btn_desfazer.setIcon(QtGui.QIcon(f"assets/icons/undo{suffix}.png"))
+        self.btn_refazer.setIcon(QtGui.QIcon(f"assets/icons/redo{suffix}.png"))
+        
+        # --- NOVO: Botões de Formatação ---
+        self.btn_negrito.setIcon(QtGui.QIcon(f"assets/icons/negrito{suffix}.png"))
+        self.btn_italico.setIcon(QtGui.QIcon(f"assets/icons/italico{suffix}.png"))
+        self.btn_sublinhado.setIcon(QtGui.QIcon(f"assets/icons/sublinhado{suffix}.png"))
+        # --- FIM DA ADIÇÃO ---
+        
+        # Botões de Quebra
+        self.btn_quebra_pagina.setIcon(QtGui.QIcon(f"assets/icons/page_break{suffix}.png"))
+        self.btn_pagina_em_branco.setIcon(QtGui.QIcon(f"assets/icons/blank_page{suffix}.png"))
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
@@ -298,7 +344,7 @@ class AbaConteudo(QWidget):
             
             btn_add_bin = QToolButton()
             icon_add = QtGui.QIcon.fromTheme("folder-new", 
-                                  self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+                                    self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
             btn_add_bin.setIcon(icon_add)
             btn_add_bin.setToolTip("Criar novo bin (pasta)")
             btn_add_bin.clicked.connect(add_slot)
@@ -306,7 +352,7 @@ class AbaConteudo(QWidget):
             
             btn_del_bin = QToolButton()
             icon_del = QtGui.QIcon.fromTheme("edit-delete",
-                                  self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+                                    self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
             btn_del_bin.setIcon(icon_del)
             btn_del_bin.setToolTip("Remover bin selecionado")
             btn_del_bin.setProperty("cssClass", "destructive") 
@@ -552,6 +598,29 @@ class AbaConteudo(QWidget):
         self.btn_refazer.setToolTip("Refazer (Ctrl+Y)")
         self.btn_refazer.setEnabled(False)
         format_toolbar.addWidget(self.btn_refazer)
+        
+        # --- INÍCIO DA ADIÇÃO (vX.X - Formatação de Texto) ---
+        self.btn_negrito = QToolButton()
+        self.btn_negrito.setIcon(QtGui.QIcon("assets/icons/negrito.png"))
+        self.btn_negrito.setToolTip("Negrito (Ctrl+B)")
+        self.btn_negrito.setShortcut("Ctrl+B")
+        self.btn_negrito.clicked.connect(self._aplicar_formatacao_negrito)
+        format_toolbar.addWidget(self.btn_negrito)
+
+        self.btn_italico = QToolButton()
+        self.btn_italico.setIcon(QtGui.QIcon("assets/icons/italico.png"))
+        self.btn_italico.setToolTip("Itálico (Ctrl+I)")
+        self.btn_italico.setShortcut("Ctrl+I")
+        self.btn_italico.clicked.connect(self._aplicar_formatacao_italico)
+        format_toolbar.addWidget(self.btn_italico)
+
+        self.btn_sublinhado = QToolButton()
+        self.btn_sublinhado.setIcon(QtGui.QIcon("assets/icons/sublinhado.png"))
+        self.btn_sublinhado.setToolTip("Sublinhado (Ctrl+U)")
+        self.btn_sublinhado.setShortcut("Ctrl+U")
+        self.btn_sublinhado.clicked.connect(self._aplicar_formatacao_sublinhado)
+        format_toolbar.addWidget(self.btn_sublinhado)
+        # --- FIM DA ADIÇÃO ---
         
         self.btn_quebra_pagina = QToolButton()
         self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break.png")) 
@@ -844,9 +913,17 @@ class AbaConteudo(QWidget):
     def _carregar_capitulo_no_editor(self, item_atual, item_anterior):
         capitulo = self._get_capitulo_selecionado()
         elementos_habilitados = True if capitulo else False
+        
+        # Habilita/Desabilita todos os botões da toolbar
         self.bancos_tabs.setEnabled(elementos_habilitados)
         self.btn_quebra_pagina.setEnabled(elementos_habilitados)
         self.btn_pagina_em_branco.setEnabled(elementos_habilitados)
+        
+        # --- NOVO: Habilita/Desabilita Botões de Formatação ---
+        self.btn_negrito.setEnabled(elementos_habilitados)
+        self.btn_italico.setEnabled(elementos_habilitados)
+        self.btn_sublinhado.setEnabled(elementos_habilitados)
+        # --- FIM DA ADIÇÃO ---
         
         if hasattr(self, 'btn_desfazer'):
             self.btn_desfazer.setEnabled(elementos_habilitados and self.editor_capitulo.document().isUndoAvailable())
@@ -1391,3 +1468,48 @@ class AbaConteudo(QWidget):
         root_widget = self.arvore_capitulos.invisibleRootItem()
         percorrer_arvore_ui(root_widget, nova_raiz)
         self.documento.estrutura_textual.filhos = nova_raiz.filhos
+    
+    def _aplicar_marcador_formatacao(self, marcador_inicio, marcador_fim=None):
+        """
+        Aplica ou remove marcadores (como ** ou *) ao redor do texto 
+        selecionado no editor, implementando a lógica de "toggle".
+        """
+        if marcador_fim is None:
+            marcador_fim = marcador_inicio
+        
+        cursor = self.editor_capitulo.textCursor()
+        texto_selecionado = cursor.selectedText()
+        
+        # --- NOVA LÓGICA DE TOGGLE ---
+        # 1. Verifica se o texto selecionado JÁ ESTÁ formatado
+        if (texto_selecionado.startswith(marcador_inicio) and 
+            texto_selecionado.endswith(marcador_fim) and
+            len(texto_selecionado) >= (len(marcador_inicio) + len(marcador_fim))):
+            
+            # Remove a formatação (Unwrap)
+            texto_desembrulhado = texto_selecionado[len(marcador_inicio):-len(marcador_fim)]
+            cursor.insertText(texto_desembrulhado)
+        
+        # 2. Se nada estiver selecionado, insere os marcadores
+        elif not texto_selecionado:
+            pos_inicial = cursor.position()
+            cursor.insertText(f"{marcador_inicio}{marcador_fim}")
+            # Posiciona o cursor no meio
+            cursor.setPosition(pos_inicial + len(marcador_inicio))
+            self.editor_capitulo.setTextCursor(cursor)
+        
+        # 3. Se for texto normal, aplica a formatação (Wrap)
+        else:
+            cursor.insertText(f"{marcador_inicio}{texto_selecionado}{marcador_fim}")
+
+    @QtCore.Slot()
+    def _aplicar_formatacao_negrito(self):
+        self._aplicar_marcador_formatacao("**")
+
+    @QtCore.Slot()
+    def _aplicar_formatacao_italico(self):
+        self._aplicar_marcador_formatacao("~")
+
+    @QtCore.Slot()
+    def _aplicar_formatacao_sublinhado(self):
+        self._aplicar_marcador_formatacao("_")
