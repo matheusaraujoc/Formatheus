@@ -80,11 +80,18 @@ class MarcadorHighlighter(QSyntaxHighlighter):
         )
 
         base_colors = {
-            "Tabela": "#0078d4", "Figura": "#008a00", "Grafico": "#8a008a",
-            "Grafico3D": "#008080", "Formula": "#d13438", "Lista": "#b45f06",
-            "QUEBRA_PAGINA": "#a0a0a0", "PAGINA_EM_BRANCO": "#a0a0a0",
+            "Tabela": "#0078d4",      # Azul
+            "Figura": "#008a00",      # Verde
+            "Grafico": "#8a008a",     # Roxo
+            "Grafico3D": "#008080",    # Verde-azulado (Teal)
+            "Formula": "#d13438",     # Vermelho
+            "Lista": "#b45f06",      # Laranja-Queimado
+            
+            # --- MODIFICADO: Cores distintas ---
+            "QUEBRA_PAGINA": "#FF8C00",      # Laranja Escuro
+            "PAGINA_EM_BRANCO": "#6A5ACD",   # Azul-Ardósia (SlateBlue)
         }
-
+        
         for tipo, cor_hex in base_colors.items():
             format_marcador = QTextCharFormat()
             format_marcador.setForeground(QColor(cor_hex))

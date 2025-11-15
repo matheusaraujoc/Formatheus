@@ -7,6 +7,14 @@
 # 2. Criado o método _atualizar_icones_do_tema()
 # 3. Widgets com ícones convertidos para atributos self.
 #
+# ATUALIZAÇÃO (vX.X - Preview em Thread):
+# 1. Adicionado PreviewWorker e QThread para gerar HTML em segundo plano.
+# 2. Implementada lógica de fila (is_preview_worker_busy, pending_preview_update).
+# 3. _atualizar_preview agora é um "despachante" que envia dados para a thread.
+# 4. _apply_html_to_preview é o novo slot que recebe o HTML da thread.
+# 5. Adicionado copy.deepcopy para segurança entre threads.
+# 6. Adicionada limpeza da thread no closeEvent.
+#
 
 import sys
 import os
@@ -16,11 +24,16 @@ os.environ['QTWEBENGINE_REMOTE_DEBUGGING'] = '9222'
 
 import shutil
 from datetime import datetime
+import copy # <-- NOVO: Para deepcopy (segurança da thread)
+
 from PySide6 import QtWidgets, QtCore, QtGui 
+# --- INÍCIO: Novas importações para Threading ---
+from PySide6.QtCore import QObject, QThread, Signal, Slot
+# --- FIM: Novas importações para Threading ---
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEdit,
-                               QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog,
-                               QMessageBox, QTabWidget, QComboBox,
-                               QFormLayout, QMenuBar, QCheckBox, QSplitter, QStyle)
+                             QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog,
+                             QMessageBox, QTabWidget, QComboBox,
+                             QFormLayout, QMenuBar, QCheckBox, QSplitter, QStyle)
 from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QIcon 
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -56,7 +69,36 @@ import gerenciador_recuperacao
 from dialogs import DialogoRecuperacao
 # -------------------------------------------------------------------------------
 
+
+# --- INÍCIO: Worker de Preview (Anti-travamento) ---
+class PreviewWorker(QObject):
+    """Trabalhador para gerar HTML em uma thread separada."""
+    finished = Signal(str) # Emite o HTML (str) quando termina
+
+    @Slot(object)
+    def run_generation(self, documento_copiado):
+        """Executa a tarefa pesada (geração de HTML)."""
+        try:
+            # 'documento_copiado' é uma deepcopy do self.documento
+            gerador = GeradorHTMLPreview(documento_copiado)
+            html_content = gerador.gerar_html()
+            self.finished.emit(html_content)
+        except Exception as e:
+            # Emite um sinal de erro
+            print(f"Erro na thread do worker de preview: {e}")
+            # Emite string vazia para sinalizar o fim
+            self.finished.emit("") 
+
+# --- FIM: Worker de Preview ---
+
+
 class ABNTHelperApp(QWidget):
+    
+    # --- INÍCIO: Adicionar Signal para a thread ---
+    # Signal para enviar o objeto 'documento' (copiado) para o worker
+    request_preview_update = Signal(object) 
+    # --- FIM: Adicionar Signal ---
+    
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Formatheus')
@@ -87,6 +129,23 @@ class ABNTHelperApp(QWidget):
         self.preview_update_timer.setSingleShot(True)
         self.preview_update_timer.setInterval(750)
         self.preview_update_timer.timeout.connect(self._atualizar_preview)
+        
+        # --- INÍCIO: Flags e setup da Thread de Preview ---
+        self.is_preview_worker_busy = False
+        self.pending_preview_update = False
+        
+        self.preview_thread = QThread()
+        self.preview_worker = PreviewWorker()
+        self.preview_worker.moveToThread(self.preview_thread)
+        
+        # Conexões da Thread
+        # Conecta o sinal que pede o trabalho ao slot do worker que o executa
+        self.request_preview_update.connect(self.preview_worker.run_generation) 
+        # Conecta o sinal de 'finalizado' do worker ao slot que aplica o HTML na UI
+        self.preview_worker.finished.connect(self._apply_html_to_preview) 
+        
+        self.preview_thread.start()
+        # --- FIM: Flags e setup da Thread de Preview ---
         
         self.autosave_timer = QtCore.QTimer(self)
         intervalo_ms = self.config['recovery']['autosave_periodic_interval_min'] * 60 * 1000
@@ -412,9 +471,26 @@ class ABNTHelperApp(QWidget):
             splitter = QSplitter(QtCore.Qt.Orientation.Horizontal, self)
             splitter.addWidget(self.tabs)
             splitter.addWidget(self.preview_container)
-            splitter.setSizes([800, 600]) 
+            
+            # Define sua proporção personalizada
+            splitter.setSizes([1000, 400]) 
             
             splitter.splitterMoved.connect(self._on_splitter_moved)
+            
+            # --- INÍCIO DA CORREÇÃO (Zoom Inicial) ---
+            # Copia a lógica de zoom aqui para ser executada UMA VEZ no início.
+            sizes = splitter.sizes()
+            if len(sizes) == 2 and sum(sizes) > 0 and self.NEUTRAL_PREVIEW_RATIO > 0:
+                total_width = sum(sizes)
+                current_preview_width = sizes[1]
+                
+                if current_preview_width > 0:
+                    current_ratio = current_preview_width / total_width
+                    ratio_change = current_ratio / self.NEUTRAL_PREVIEW_RATIO
+                    new_zoom = self.BASE_ZOOM_FACTOR * ratio_change
+                    new_zoom = max(0.2, min(new_zoom, 3.0)) 
+                    self.preview_display.setZoomFactor(new_zoom)
+            # --- FIM DA CORREÇÃO (Zoom Inicial) ---
             
             self.main_content_widget = splitter
             self.preview_container.show()
@@ -591,8 +667,29 @@ class ABNTHelperApp(QWidget):
             
     @QtCore.Slot()
     def _restaurar_scroll_preview(self):
+        # --- INÍCIO DA CORREÇÃO (Re-aplicar Zoom após carregar HTML) ---
+        # Garante que o zoom correto seja aplicado toda vez que o HTML é recarregado.
+        
+        # Apenas executa a lógica de zoom se estivermos no modo lado-a-lado
+        if self.modo_preview == "lado_a_lado" and isinstance(self.main_content_widget, QSplitter):
+            splitter = self.main_content_widget
+            sizes = splitter.sizes()
+            
+            if len(sizes) == 2 and sum(sizes) > 0 and self.NEUTRAL_PREVIEW_RATIO > 0:
+                total_width = sum(sizes)
+                current_preview_width = sizes[1]
+                
+                if current_preview_width > 0:
+                    current_ratio = current_preview_width / total_width
+                    ratio_change = current_ratio / self.NEUTRAL_PREVIEW_RATIO
+                    new_zoom = self.BASE_ZOOM_FACTOR * ratio_change
+                    new_zoom = max(0.2, min(new_zoom, 3.0)) 
+                    self.preview_display.setZoomFactor(new_zoom)
+        # --- FIM DA CORREÇÃO ---
+        
+        # Restaura a posição do scroll (como antes)
         self.preview_display.page().runJavaScript(f"window.scrollTo(0, {self.scroll_posicao});")
-
+    
     @QtCore.Slot(str)
     def _navegar_preview_para_ancora(self, id_ancora: str):
         if not id_ancora:
@@ -611,19 +708,93 @@ class ABNTHelperApp(QWidget):
         """
         self.preview_display.page().runJavaScript(js_code)
 
+    # --- INÍCIO: Método _atualizar_preview (Refatorado para Thread) ---
     @QtCore.Slot()
     def _atualizar_preview(self):
+        """
+        Verifica a fila e despacha a geração da preview para uma thread
+        separada, evitando travamento da UI.
+        """
+        # Se o worker estiver ocupado, apenas marque que queremos uma atualização
+        # e saia. O worker chamará esta função quando terminar.
+        if self.is_preview_worker_busy:
+            self.pending_preview_update = True
+            print("Preview worker ocupado. Adicionando à fila.")
+            return
+
+        # Se o worker estiver livre, inicie o trabalho.
+        print("Iniciando atualização da preview em segundo plano...")
+        self.is_preview_worker_busy = True
+        self.pending_preview_update = False
+
+        # 1. Salva o scroll (na thread principal)
         if self.modo_preview == "lado_a_lado":
             self._salvar_scroll_preview()
+        
+        # 2. Sincroniza os dados (na thread principal)
+        # Garante que o documento tenha os dados mais recentes do editor e da UI
         self.aba_conteudo.sincronizar_conteudo_pendente()
         self._sincronizar_modelo_com_ui()
+        
+        # 3. Cria uma cópia segura dos dados para a thread
+        try:
+            # Deepcopy é essencial para evitar que a thread acesse
+            # o mesmo objeto que a UI está modificando.
+            documento_copia = copy.deepcopy(self.documento)
+        except Exception as e:
+            print(f"Erro ao copiar documento para a thread: {e}")
+            self.is_preview_worker_busy = False # Libera a trava se a cópia falhar
+            return
+
+        # 4. Envia a cópia para a thread de trabalho emitindo o sinal
+        self.request_preview_update.emit(documento_copia)
+    # --- FIM: Método _atualizar_preview ---
+
+
+    # --- INÍCIO: Novo Slot para receber o resultado da Thread ---
+    @QtCore.Slot(str)
+    def _apply_html_to_preview(self, html_content):
+        """
+        Chamado pela thread do worker quando o HTML está pronto.
+        Este método roda na thread principal e atualiza a UI.
+        """
+        print("Preview HTML recebido da thread. Atualizando UI.")
+        
+        # Se o conteúdo for vazio, o worker provavelmente falhou
+        if not html_content:
+            print("Worker retornou HTML vazio (provável erro na geração).")
+            # Libera a trava, mas não verifica se há atualização pendente
+            # para evitar um loop de falhas.
+            self.is_preview_worker_busy = False
+            return
+
+        # 1. Limpa a busca e define o HTML
         self.preview_display.findText("")
-        gerador = GeradorHTMLPreview(self.documento)
-        html_content = gerador.gerar_html()
         base_url = QtCore.QUrl.fromLocalFile(os.path.abspath(os.path.dirname(__file__)))
         self.preview_display.setHtml(html_content, baseUrl=base_url)
+        
+        # self._restaurar_scroll_preview() já é chamado automaticamente 
+        # pelo sinal 'loadFinished' do QWebEngineView.
+
+        # 2. Mostra a mensagem (se estiver no modo aba)
         if self.modo_preview == "aba":
             QMessageBox.information(self, "Atualizado", "A pré-visualização foi atualizada com sucesso.")
+        
+        # 3. Lógica da Fila: Verifica se uma nova atualização foi solicitada
+        #    enquanto esta estava sendo gerada.
+        if self.pending_preview_update:
+            print("Atualização pendente detectada. Reiniciando o worker...")
+            # Limpa as flags e chama _atualizar_preview imediatamente
+            # para processar a versão mais recente dos dados.
+            self.pending_preview_update = False
+            self.is_preview_worker_busy = False
+            self._atualizar_preview() # Dispara a atualização pendente
+        else:
+            # Se não houver nada pendente, o worker está livre.
+            self.is_preview_worker_busy = False
+            print("Worker da preview está ocioso.")
+    # --- FIM: Novo Slot ---
+
 
     def _marcar_modificado(self):
         if self._populando_ui:
@@ -643,6 +814,16 @@ class ABNTHelperApp(QWidget):
             if self.caminho_projeto_atual or self.modificado:
                  gerenciador_recuperacao.limpar_recuperacao(self.caminho_projeto_atual)
             self.gerenciador_projeto.fechar_projeto()
+            
+            # --- INÍCIO: Limpeza da Thread de Preview ---
+            print("Encerrando thread da preview...")
+            self.preview_thread.quit()
+            # Espera até 3 segundos pela thread encerrar
+            if not self.preview_thread.wait(3000): 
+                print("Thread da preview não encerrou, forçando término.")
+                self.preview_thread.terminate()
+            # --- FIM: Limpeza da Thread de Preview ---
+            
             event.accept()
         else:
             event.ignore()
@@ -866,8 +1047,8 @@ class ABNTHelperApp(QWidget):
         caminho_sugerido_completo = os.path.join(diretorio_sugerido, nome_arquivo_sugerido)
         
         filename, _ = QFileDialog.getSaveFileName(self, "Salvar Documento", 
-                                                    caminho_sugerido_completo, 
-                                                    "Word Documents (*.docx)")
+                                                 caminho_sugerido_completo, 
+                                                 "Word Documents (*.docx)")
         
         if not filename: return
         try:
