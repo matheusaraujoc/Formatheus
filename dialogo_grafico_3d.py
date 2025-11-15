@@ -108,7 +108,7 @@ class PointDataSourcePanel(QWidget):
         tree_layout = QVBoxLayout(data_group)
         
         self.import_btn = QPushButton("Importar Pontos (CSV/Excel)...")
-        self.import_btn.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
+        self.import_btn.setIcon(QtGui.QIcon.fromTheme("document-open"))
         self.import_btn.clicked.connect(self._import_point_file)
         tree_layout.addWidget(self.import_btn)
         
@@ -387,7 +387,7 @@ class GridDataSourcePanel(QWidget):
         form_layout.addRow(color_layout)
         
         self.import_btn = QPushButton("Importar Matriz (CSV/Excel)...")
-        self.import_btn.setIcon(QApplication.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
+        self.import_btn.setIcon(QtGui.QIcon.fromTheme("document-open"))
         self.import_btn.clicked.connect(self._import_grid_file)
         form_layout.addRow(self.import_btn)
         

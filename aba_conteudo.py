@@ -91,7 +91,7 @@ class MarcadorHighlighter(QSyntaxHighlighter):
             "QUEBRA_PAGINA": "#FF8C00",      # Laranja Escuro
             "PAGINA_EM_BRANCO": "#6A5ACD",   # Azul-Ardósia (SlateBlue)
         }
-        
+
         for tipo, cor_hex in base_colors.items():
             format_marcador = QTextCharFormat()
             format_marcador.setForeground(QColor(cor_hex))
@@ -780,7 +780,7 @@ class AbaConteudo(QWidget):
             item_bin.setFlags(item_bin.flags() | Qt.ItemFlag.ItemIsEditable) 
             item_bin.setData(0, self.OLD_NAME_ROLE, nome_bin) 
             
-            item_bin.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+            item_bin.setIcon(0, QtGui.QIcon.fromTheme("folder"))
             bins_existentes[nome_bin] = item_bin
             
         for ativo in lista_ativos:
@@ -965,7 +965,7 @@ class AbaConteudo(QWidget):
 
         item_bin = QTreeWidgetItem(tree_widget, [temp_name])
         item_bin.setFont(0, self.bin_font)
-        item_bin.setIcon(0, self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon))
+        item_bin.setIcon(0, QtGui.QIcon.fromTheme("folder"))
         
         flags = (Qt.ItemFlag.ItemIsSelectable | 
                  Qt.ItemFlag.ItemIsUserCheckable | 

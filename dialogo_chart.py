@@ -140,6 +140,7 @@ class DataSourcePanel(QWidget):
         
         # --- MODIFICAÇÃO (v54 - Suporte a Excel) ---
         self.load_file_btn = QPushButton('Carregar Dados...')
+        self.load_file_btn.setIcon(QtGui.QIcon.fromTheme("document-open"))
         self.load_file_btn.clicked.connect(self._load_data_file)
         
         top_data_layout.addWidget(self.dataset_cb)
