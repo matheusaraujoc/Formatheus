@@ -198,24 +198,20 @@ def main():
             
             self.setWindowTitle("Formatheus Launcher")
 
-            # --- CORREÇÃO (ÍCONE) ---
-            # Presume que seu ícone se chama 'formatheus.ico' e está na pasta 'launcher_assets/'
             try:
-                # O caminho é relativo à raiz (onde laucher.py está)
                 icon_path = resource_path(os.path.join("launcher_assets", "icons", "formatheus.ico"))
                 self.setWindowIcon(QIcon(icon_path)) 
             except Exception as e:
                 print(f"Aviso: Não foi possível carregar o ícone do launcher: {e}")
-                self.setWindowIcon(QIcon()) # Define um ícone vazio em caso de falha
-            # --- FIM DA CORREÇÃO ---
+                self.setWindowIcon(QIcon()) 
             
             self.setFixedSize(400, 350)
             
             self._build_ui()
+            
         def _get_icon(self, name: str):
             # (Removida dependência de assets)
             return QIcon()
-        # --- FIM DA CORREÇÃO ---
 
         def _build_ui(self):
             main_layout = QVBoxLayout(self)
@@ -232,6 +228,7 @@ def main():
             
             self.action_btn = QPushButton("")
             self.action_btn.setMinimumHeight(45)
+            self.action_btn.setProperty("cssClass", "primary") 
             self.action_btn.clicked.connect(self.on_action_clicked)
             
             if self.is_first_run:
@@ -266,12 +263,8 @@ def main():
             # (Simulação de download/instalação)
             # TODO: Adicionar a lógica de download e unzip real aqui
             print("[Launcher] (Simulação) Baixando e instalando...")
-            # Ex: self.thread = DownloadThread(self.update_info['url'])
-            #     self.thread.finished.connect(self.on_install_finished)
-            #     self.thread.start()
             
             # --- Simulação direta por enquanto ---
-            # Salva a nova versão local
             if self.update_info:
                 save_local_config({"local_version": self.update_info.get("version", "1.0.0")})
             else:
@@ -286,13 +279,44 @@ def main():
     # 3. Agora, continue o fluxo normal do main()
     app = QApplication(sys.argv)
     
-    initial_theme = "dark" 
+    # --- INÍCIO DA CORREÇÃO DO TEMA ---
+    
+    # 1. Define "light" como tema padrão (fallback)
+    initial_theme = "light" 
+
+    # 2. Tenta ler o config do usuário APENAS se não for a primeira execução
+    if not is_first_run:
+        try:
+            # Adiciona /app ao path para encontrar o gerenciador_config
+            sys.path.insert(0, APP_DIR)
+            import gerenciador_config
+            
+            # Carrega o config principal do app
+            config_app = gerenciador_config.carregar_config()
+            # Usa "light" como padrão se a chave não existir
+            initial_theme = config_app.get('ui_settings', {}).get('theme', 'light') 
+            print(f"[Launcher] Tema do usuário detectado: {initial_theme}")
+        except ImportError:
+            print("[Launcher] Não foi possível encontrar 'gerenciador_config' em /app. Usando tema padrão.")
+        except Exception as e:
+            print(f"[Launcher] Erro ao ler config do app: {e}. Usando tema padrão.")
+
+    # 3. Aplica o tema (padrão ou o do usuário)
     if HAS_THEME_LIB:
         try:
             qss = qdarktheme.load_stylesheet(initial_theme)
+            
+            if not is_first_run:
+                try:
+                    import stylesheet
+                    qss += stylesheet.get_style_sheet()
+                except ImportError:
+                    pass 
+            
             app.setStyleSheet(qss)
         except Exception as e:
             print(f"Não foi possível carregar o tema do launcher: {e}")
+    # --- FIM DA CORREÇÃO DO TEMA ---
 
     # A classe LauncherWindow foi definida acima, então esta linha funciona
     window = LauncherWindow(
