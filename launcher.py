@@ -13,6 +13,18 @@ import shutil
 import tempfile
 from datetime import datetime
 
+#IDENTIFICA SE ESTÁ RODANDO NO PYINSTALLER
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para o recurso, funcionando em dev e no PyInstaller """
+    try:
+        # PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Se não estiver compilado, usa o caminho normal do script
+        base_path = os.path.abspath(os.path.dirname(__file__))
+
+    return os.path.join(base_path, relative_path)
+
 # --- 1. Importações de Rede (Leves) ---
 try:
     import requests
@@ -185,13 +197,21 @@ def main():
             self.is_first_run = is_first_run
             
             self.setWindowTitle("Formatheus Launcher")
-            self.setWindowIcon(QIcon()) 
+
+            # --- CORREÇÃO (ÍCONE) ---
+            # Presume que seu ícone se chama 'formatheus.ico' e está na pasta 'launcher_assets/'
+            try:
+                # O caminho é relativo à raiz (onde laucher.py está)
+                icon_path = resource_path(os.path.join("launcher_assets", "icons", "formatheus.ico"))
+                self.setWindowIcon(QIcon(icon_path)) 
+            except Exception as e:
+                print(f"Aviso: Não foi possível carregar o ícone do launcher: {e}")
+                self.setWindowIcon(QIcon()) # Define um ícone vazio em caso de falha
+            # --- FIM DA CORREÇÃO ---
+            
             self.setFixedSize(400, 350)
             
             self._build_ui()
-
-        # --- CORREÇÃO PYLANCE FINAL ---
-        # Anotação de tipo removida para evitar o aviso
         def _get_icon(self, name: str):
             # (Removida dependência de assets)
             return QIcon()

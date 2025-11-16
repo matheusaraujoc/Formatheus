@@ -31,6 +31,19 @@ from dialogo_chart import ChartDialog
 from dialogo_grafico_3d import Grafico3DDialog
 # ------------------------------------
 import os
+import sys
+
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para o recurso, funcionando em dev e no PyInstaller """
+    try:
+        # PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
+        # Esta é a parte que roda no app compilado (.exe)
+        base_path = sys._MEIPASS
+    except Exception:
+        # Esta é a parte que roda no desenvolvimento (rodando o .py)
+        base_path = os.path.abspath(os.path.dirname(__file__))
+
+    return os.path.join(base_path, relative_path)
 
 # --- CLASSE SYNTAX HIGHLIGHTER PARA MARCADORES ---
 
@@ -229,7 +242,7 @@ class AbaConteudo(QWidget):
 
         # --- INÍCIO DA ADIÇÃO ---
         self.is_dark_theme = False # Será atualizado pelo main_app
-        self.ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
+        self.ICON_PATH = resource_path(os.path.join("assets", "icons"))
         # --- FIM DA ADIÇÃO ---
         
         self.lista_botoes_bin = []
@@ -259,18 +272,15 @@ class AbaConteudo(QWidget):
         suffix = "-white" if is_dark else ""
         
         # --- INÍCIO DA CORREÇÃO ---
-        # Usa self.ICON_PATH para garantir o caminho absoluto
+        # Usa self.ICON_PATH (que agora usa resource_path)
         
-        # Nomes da captura de tela
         self.btn_desfazer.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"undo{suffix}.png")))
         self.btn_refazer.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"redo{suffix}.png")))
         
-        # Nomes que você especificou (negrito, italico, sublinhado)
         self.btn_negrito.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"negrito{suffix}.png")))
         self.btn_italico.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"italico{suffix}.png")))
         self.btn_sublinhado.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"sublinhado{suffix}.png")))
         
-        # Nomes da captura de tela
         self.btn_quebra_pagina.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"page_break{suffix}.png")))
         self.btn_pagina_em_branco.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"blank_page{suffix}.png")))
         # --- FIM DA CORREÇÃO ---

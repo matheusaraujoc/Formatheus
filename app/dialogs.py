@@ -4,7 +4,7 @@
 
 import os
 import shutil
-from PySide6 import QtWidgets, QtCore
+from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QLineEdit, QComboBox,
                                QFormLayout, QVBoxLayout, QDialogButtonBox, QListWidget,
                                QListWidgetItem, QTableWidget, QTableWidgetItem, QMessageBox,
@@ -15,15 +15,34 @@ from datetime import datetime
 
 from referencia import Livro, Artigo, Site
 from documento import Tabela # Removido Figura daqui
+import sys
 
-# LARGURA_MAXIMA_CM foi movido para dialogo_figura.py
+#Função para obter o caminho absoluto dos recursos
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para o recurso, funcionando em dev e no PyInstaller """
+    try:
+        # PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Se não estiver compilado, usa o caminho normal do script
+        base_path = os.path.abspath(os.path.dirname(__file__))
 
-# A CLASSE DIALOGOFIGURA FOI REMOVIDA DESTE ARQUIVO
+    return os.path.join(base_path, relative_path)
 
 class ReferenciaDialog(QDialog):
     def __init__(self, ref=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Adicionar/Editar Referência")
+
+        # --- ADIÇÃO DO ÍCONE ---
+        try:
+            # Presume que este arquivo está na pasta 'app'
+            icon_path = resource_path(os.path.join("assets", "icons", "formatheus.ico"))
+            self.setWindowIcon(QtGui.QIcon(icon_path))
+        except Exception as e:
+            print(f"Aviso (ReferenciaDialog): Não foi possível carregar o ícone: {e}")
+        # --- FIM DA ADIÇÃO ---
+        
         self.layout = QVBoxLayout(self); self.form_layout = QFormLayout()
         self.tipo_combo = QComboBox(); self.tipo_combo.addItems(["Livro", "Artigo", "Site"])
         self.autores_input = QLineEdit(); self.autores_input.setPlaceholderText("Autor 1; Autor 2")
@@ -50,7 +69,6 @@ class ReferenciaDialog(QDialog):
         self.layout.addWidget(self.buttons)
         if ref: self._popular_campos(ref)
         else: self.update_form_visibility(self.tipo_combo.currentText())
-
     def _popular_campos(self, ref):
         self.tipo_combo.setCurrentText(ref.tipo); self.autores_input.setText(ref.autores)
         self.titulo_input.setText(ref.titulo); self.ano_input.setText(str(ref.ano))
@@ -100,6 +118,16 @@ class DialogoRecuperacao(QDialog):
     def __init__(self, arquivos: list[dict], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Recuperação de Arquivos")
+
+        # --- ADIÇÃO DO ÍCONE ---
+        try:
+            # Presume que este arquivo está na pasta 'app'
+            icon_path = resource_path(os.path.join("assets", "icons", "formatheus.ico"))
+            self.setWindowIcon(QtGui.QIcon(icon_path))
+        except Exception as e:
+            print(f"Aviso (DialogoRecuperacao): Não foi possível carregar o ícone: {e}")
+        # --- FIM DA ADIÇÃO ---
+        
         self.setMinimumWidth(550)
 
         self.arquivos_para_recuperar = []

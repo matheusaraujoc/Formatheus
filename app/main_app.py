@@ -38,6 +38,19 @@ from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QIcon
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
+#IDENTIFICA SE ESTÁ RODANDO NO PYINSTALLER
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para o recurso, funcionando em dev e no PyInstaller """
+    try:
+        # PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Se não estiver compilado, usa o caminho normal do script
+        base_path = os.path.abspath(os.path.dirname(__file__))
+
+    return os.path.join(base_path, relative_path)
+
+
 # --- Tenta importar o tema ---
 try:
     import qdarktheme
@@ -102,9 +115,25 @@ class ABNTHelperApp(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Formatheus')
+
+        # --- INÍCIO DA CORREÇÃO (ÍCONE) ---
+        # 1. Define o ícone da janela principal
+        # (Presume que seu ícone se chama 'formatheus.ico' e está em 'app/assets/icons/')
+        try:
+            # O caminho é relativo à pasta 'app' (onde main_app.py está)
+            icon_path = resource_path(os.path.join("assets", "icons", "formatheus.ico"))
+            self.setWindowIcon(QIcon(icon_path))
+        except Exception as e:
+            print(f"Aviso: Não foi possível carregar o ícone da aplicação: {e}")
+        # --- FIM DA CORREÇÃO ---
+        
         self.setGeometry(100, 100, 1400, 800)
 
-        self.ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
+        # --- CORREÇÃO DO CAMINHO (ASSETS) ---
+        # 2. Define o caminho base para *outros* ícones (undo, redo, etc.)
+        #    para que o 'aba_conteudo.py' possa usá-lo
+        self.ICON_PATH = resource_path(os.path.join("assets", "icons"))
+        # --- FIM DA CORREÇÃO ---
 
         self.config = gerenciador_config.carregar_config()
         self.documento = DocumentoABNT()
@@ -160,7 +189,7 @@ class ABNTHelperApp(QWidget):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
 
         self.main_content_widget = None
-                                
+                        
         self._build_ui()
         self._conectar_sinais_modificacao()
         gerenciador_recuperacao.setup_diretorios()

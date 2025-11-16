@@ -12,6 +12,16 @@ import gerenciador_config
 import gerenciador_recuperacao
 from dialogs import DialogoRecuperacao
 from modelos_trabalho import get_nomes_modelos
+import sys
+
+#Função para obter o caminho absoluto dos recursos
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para o recurso, funcionando em dev e no PyInstaller """
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(os.path.dirname(__file__))
+    return os.path.join(base_path, relative_path)
 
 class ProjetoRecenteItem(QWidget):
     """Widget customizado para exibir um item na lista de projetos recentes."""
@@ -38,16 +48,30 @@ class TelaInicial(QDialog):
     def __init__(self, is_dark: bool = False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Bem-vindo ao Formatheus")
+        
+        # --- INÍCIO DA CORREÇÃO ---
+        # 1. Define o ícone da janela (à prova de compilação)
+        try:
+            # Presume que tela_inicial.py está na pasta 'app'
+            icon_path = resource_path(os.path.join("assets", "icons", "formatheus.ico"))
+            self.setWindowIcon(QtGui.QIcon(icon_path))
+        except Exception as e:
+            print(f"Aviso (TelaInicial): Não foi possível carregar o ícone: {e}")
+        # --- FIM DA CORREÇÃO ---
+
         self.setMinimumSize(950, 550)
         
         self.resultado = (None, None) 
 
-        # --- INÍCIO DA ADIÇÃO ---
-        # Salva o estado do tema e define o caminho dos ícones
         self.is_dark = is_dark
-        self.ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
+        
+        # --- CORREÇÃO DO CAMINHO INTERNO ---
+        # 2. Corrige self.ICON_PATH para usar a nova função
+        # self.ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons") # <-- ANTIGO
+        self.ICON_PATH = resource_path(os.path.join("assets", "icons")) # <-- NOVO
+        # --- FIM DA CORREÇÃO ---
+
         suffix = "-white" if self.is_dark else ""
-        # --- FIM DA ADIÇÃO ---
 
         main_layout = QHBoxLayout(self)
 
@@ -61,14 +85,12 @@ class TelaInicial(QDialog):
         
         btn_novo = QPushButton("Novo Projeto")
         btn_novo.setProperty("cssClass", "primary")
-        # --- MODIFICADO: Usa ícone personalizado 'doc.png' ---
         btn_novo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png")))
         btn_novo.clicked.connect(self.on_novo_projeto)
 
         btn_abrir = QPushButton("Abrir Outro...")
         btn_abrir.setObjectName("BtnAbrir") 
         btn_abrir.setProperty("cssClass", "utility")
-        # --- MODIFICADO: Usa ícone personalizado 'browser.png' ---
         btn_abrir.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"browser{suffix}.png")))
         btn_abrir.clicked.connect(self.on_abrir_projeto)
 
@@ -76,7 +98,6 @@ class TelaInicial(QDialog):
         btn_recuperacao = QPushButton("Gerenciar Recuperação")
         btn_recuperacao.setObjectName("BtnRecuperar") 
         btn_recuperacao.setProperty("cssClass", "utility")
-        # --- MODIFICADO: Usa ícone personalizado 'restore.png' ---
         btn_recuperacao.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"restore{suffix}.png")))
         btn_recuperacao.clicked.connect(self.on_gerenciar_recuperacao)
 
@@ -89,7 +110,6 @@ class TelaInicial(QDialog):
         left_layout.addStretch()
 
         # --- Painel Central (Projetos Recentes) ---
-        # (ESTA PARTE ESTAVA FALTANDO)
         center_panel = QWidget()
         center_layout = QVBoxLayout(center_panel)
         
@@ -105,7 +125,6 @@ class TelaInicial(QDialog):
         center_layout.addWidget(self.lista_recentes)
 
         # --- Painel Direito (Modelos) ---
-        # (ESTA PARTE ESTAVA FALTANDO)
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_panel.setFixedWidth(300) 
