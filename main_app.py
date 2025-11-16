@@ -104,6 +104,8 @@ class ABNTHelperApp(QWidget):
         self.setWindowTitle('Formatheus')
         self.setGeometry(100, 100, 1400, 800)
 
+        self.ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
+
         self.config = gerenciador_config.carregar_config()
         self.documento = DocumentoABNT()
         self.gerenciador_projeto = GerenciadorProjetos()
@@ -188,37 +190,43 @@ class ABNTHelperApp(QWidget):
 
     def _atualizar_icones_do_tema(self, is_dark):
         """
-        Recarrega todos os ícones baseados no tema (fromTheme)
-        e atualiza os ícones personalizados (assets).
+        Recarrega todos os ícones baseados no tema, carregando
+        os arquivos manuais da pasta assets/icons.
         """
+        suffix = "-white" if is_dark else ""
+        
+        # Mapeamento de 'fromTheme' para os nomes de arquivo da sua biblioteca
+        
         # 1. Ícones do Menu
-        self.acao_novo.setIcon(QtGui.QIcon.fromTheme("document-new"))
-        self.acao_carregar.setIcon(QtGui.QIcon.fromTheme("document-open"))
-        self.acao_salvar.setIcon(QtGui.QIcon.fromTheme("document-save"))
-        self.acao_salvar_como.setIcon(QtGui.QIcon.fromTheme("document-save-as"))
-        self.acao_voltar.setIcon(QtGui.QIcon.fromTheme("go-previous"))
-        self.acao_sair.setIcon(QtGui.QIcon.fromTheme("application-exit"))
-        self.acao_localizar.setIcon(QtGui.QIcon.fromTheme("edit-find"))
+        # (Estou mapeando os nomes 'fromTheme' para os nomes da sua imagem)
+        self.acao_novo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"file{suffix}.png")))
+        self.acao_carregar.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"folder{suffix}.png")))
+        self.acao_salvar.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png")))
+        self.acao_salvar_como.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png"))) # Reutilizando 'save'
+        self.acao_voltar.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"previous{suffix}.png")))
+        self.acao_sair.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
+        self.acao_localizar.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"search{suffix}.png")))
         
         # 2. Botão Gerar Docx
-        self.generate_btn.setIcon(QtGui.QIcon.fromTheme("document-save"))
+        self.generate_btn.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png")))
         
         # 3. Aba Geral
-        self.btn_procurar_esquerdo.setIcon(QtGui.QIcon.fromTheme("document-open"))
-        self.btn_procurar_direito.setIcon(QtGui.QIcon.fromTheme("document-open"))
+        self.btn_procurar_esquerdo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"browser{suffix}.png")))
+        self.btn_procurar_direito.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"browser{suffix}.png")))
         
         # 4. Aba Referências
-        self.btn_add_ref.setIcon(QtGui.QIcon.fromTheme("list-add"))
-        self.btn_edit_ref.setIcon(QtGui.QIcon.fromTheme("document-edit"))
-        self.btn_del_ref.setIcon(QtGui.QIcon.fromTheme("list-remove"))
+        # (Sua imagem não tem 'list-add' ou 'document-edit', estou usando substitutos)
+        self.btn_add_ref.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png"))) # Usando 'doc' como substituto
+        self.btn_edit_ref.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png"))) # Usando 'doc' como substituto
+        self.btn_del_ref.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"trash{suffix}.png")))
         
         # 5. Painel de Preview (Busca)
-        self.btn_buscar_anterior.setIcon(QtGui.QIcon.fromTheme("go-previous"))
-        self.btn_buscar_proximo.setIcon(QtGui.QIcon.fromTheme("go-next"))
-        self.btn_fechar_busca.setIcon(QtGui.QIcon.fromTheme("window-close"))
-        self.btn_atualizar_preview.setIcon(QtGui.QIcon.fromTheme("view-refresh"))
+        self.btn_buscar_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"previous{suffix}.png")))
+        self.btn_buscar_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"next{suffix}.png")))
+        self.btn_fechar_busca.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
+        self.btn_atualizar_preview.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"restore{suffix}.png")))
         
-        # 6. Ícones Personalizados (assets)
+        # 6. Ícones Personalizados (assets) - Esta parte já funciona!
         if hasattr(self, 'aba_conteudo'):
             self.aba_conteudo.update_theme_icons(is_dark)
 
@@ -1157,8 +1165,15 @@ if __name__ == '__main__':
                     gerenciador_recuperacao.limpar_recuperacao_pelo_caminho_direto(arq_info['recovery_file_path'])
 
         if not acao_inicial:
-            tela_inicial = TelaInicial()
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            # Verifica qual é o tema inicial carregado
+            is_dark_inicial = (initial_theme == "dark")
+            # Passa a informação do tema para a TelaInicial
+            tela_inicial = TelaInicial(is_dark=is_dark_inicial)
+            # --- FIM DA MODIFICAÇÃO ---
+            
             if tela_inicial.exec():
+                # --- CORREÇÃO: Esta linha estava faltando ---
                 acao_inicial, dados_iniciais = tela_inicial.get_resultado()
 
         if not acao_inicial:

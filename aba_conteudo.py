@@ -226,7 +226,14 @@ class AbaConteudo(QWidget):
         super().__init__(parent)
         self.documento = documento
         self._carregando_capitulo = False
+
+        # --- INÍCIO DA ADIÇÃO ---
+        self.is_dark_theme = False # Será atualizado pelo main_app
+        self.ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
+        # --- FIM DA ADIÇÃO ---
         
+        self.lista_botoes_bin = []
+
         self.IS_NEW_BIN_ROLE = QtCore.Qt.ItemDataRole.UserRole + 10 
         self.OLD_NAME_ROLE = QtCore.Qt.ItemDataRole.UserRole + 11
         
@@ -248,21 +255,34 @@ class AbaConteudo(QWidget):
         Atualiza os ícones personalizados (assets) com base no tema.
         Chamado pelo main_app.py.
         """
+        self.is_dark_theme = is_dark # Salva o estado do tema
         suffix = "-white" if is_dark else ""
         
-        # Botões de Desfazer/Refazer
+        # --- INÍCIO DA CORREÇÃO ---
+        # Usa caminhos relativos e os nomes de arquivo corretos
+        
+        # Nomes da captura de tela
         self.btn_desfazer.setIcon(QtGui.QIcon(f"assets/icons/undo{suffix}.png"))
         self.btn_refazer.setIcon(QtGui.QIcon(f"assets/icons/redo{suffix}.png"))
         
-        # --- NOVO: Botões de Formatação ---
+        # Nomes que você especificou (negrito, italico, sublinhado)
         self.btn_negrito.setIcon(QtGui.QIcon(f"assets/icons/negrito{suffix}.png"))
         self.btn_italico.setIcon(QtGui.QIcon(f"assets/icons/italico{suffix}.png"))
         self.btn_sublinhado.setIcon(QtGui.QIcon(f"assets/icons/sublinhado{suffix}.png"))
-        # --- FIM DA ADIÇÃO ---
         
-        # Botões de Quebra
+        # Nomes da captura de tela
         self.btn_quebra_pagina.setIcon(QtGui.QIcon(f"assets/icons/page_break{suffix}.png"))
         self.btn_pagina_em_branco.setIcon(QtGui.QIcon(f"assets/icons/blank_page{suffix}.png"))
+        # --- FIM DA CORREÇÃO ---
+
+        for btn in self.lista_botoes_bin:
+            if btn.objectName() == "btn_add_bin":
+                btn.setIcon(QtGui.QIcon(f"assets/icons/folder-plus{suffix}.png"))
+            elif btn.objectName() == "btn_del_bin":
+                btn.setIcon(QtGui.QIcon(f"assets/icons/trash{suffix}.png"))
+
+        # Força a recriação das árvores de Bins para usar os novos ícones
+        self.atualizar_bancos_visuais()
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
@@ -349,22 +369,31 @@ class AbaConteudo(QWidget):
             titulo_layout.addWidget(QLabel(titulo))
             titulo_layout.addStretch()
             
+            # --- INÍCIO DA MODIFICAÇÃO (Ícones Personalizados) ---
+            suffix = "-white" if self.is_dark_theme else ""
+            
             btn_add_bin = QToolButton()
-            icon_add = QtGui.QIcon.fromTheme("folder-new", 
-                                    self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+            icon_add = QtGui.QIcon(f"assets/icons/folder-plus{suffix}.png") 
             btn_add_bin.setIcon(icon_add)
             btn_add_bin.setToolTip("Criar novo bin (pasta)")
             btn_add_bin.clicked.connect(add_slot)
+            btn_add_bin.setObjectName("btn_add_bin") # <-- ADICIONADO
             titulo_layout.addWidget(btn_add_bin)
             
             btn_del_bin = QToolButton()
-            icon_del = QtGui.QIcon.fromTheme("edit-delete",
-                                    self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+            icon_del = QtGui.QIcon(f"assets/icons/trash{suffix}.png") 
             btn_del_bin.setIcon(icon_del)
             btn_del_bin.setToolTip("Remover bin selecionado")
             btn_del_bin.setProperty("cssClass", "destructive") 
             btn_del_bin.clicked.connect(del_slot)
+            btn_del_bin.setObjectName("btn_del_bin") # <-- ADICIONADO
             titulo_layout.addWidget(btn_del_bin)
+            
+            # Adiciona os botões à lista para atualização do tema
+            self.lista_botoes_bin.append(btn_add_bin)
+            self.lista_botoes_bin.append(btn_del_bin)
+            # --- FIM DA MODIFICAÇÃO ---
+            
             return titulo_layout
 
 
@@ -780,7 +809,10 @@ class AbaConteudo(QWidget):
             item_bin.setFlags(item_bin.flags() | Qt.ItemFlag.ItemIsEditable) 
             item_bin.setData(0, self.OLD_NAME_ROLE, nome_bin) 
             
-            item_bin.setIcon(0, QtGui.QIcon.fromTheme("folder"))
+            # --- INÍCIO DA MODIFICAÇÃO ---
+            suffix = "-white" if self.is_dark_theme else ""
+            item_bin.setIcon(0, QtGui.QIcon(os.path.join(self.ICON_PATH, f"folder{suffix}.png")))
+            # --- FIM DA MODIFICAÇÃO ---
             bins_existentes[nome_bin] = item_bin
             
         for ativo in lista_ativos:
@@ -965,7 +997,10 @@ class AbaConteudo(QWidget):
 
         item_bin = QTreeWidgetItem(tree_widget, [temp_name])
         item_bin.setFont(0, self.bin_font)
-        item_bin.setIcon(0, QtGui.QIcon.fromTheme("folder"))
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        suffix = "-white" if self.is_dark_theme else ""
+        item_bin.setIcon(0, QtGui.QIcon(os.path.join(self.ICON_PATH, f"folder{suffix}.png")))
+        # --- FIM DA MODIFICAÇÃO ---
         
         flags = (Qt.ItemFlag.ItemIsSelectable | 
                  Qt.ItemFlag.ItemIsUserCheckable | 
@@ -1182,7 +1217,7 @@ class AbaConteudo(QWidget):
             
     @QtCore.Slot()
     def _adicionar_grafico(self):
-        dialog = ChartDialog(banco_graficos=self.documento.banco_graficos, parent=self)
+        dialog = ChartDialog(banco_graficos=self.documento.banco_graficos, is_dark=self.is_dark_theme, parent=self)
         if dialog.exec():
             novo_grafico = dialog.get_dados_grafico()
             
@@ -1199,7 +1234,7 @@ class AbaConteudo(QWidget):
         # O diálogo é importado aqui para evitar dependência circular na inicialização
         from dialogo_grafico_3d import Grafico3DDialog 
         
-        dialog = Grafico3DDialog(banco_graficos_3d=self.documento.banco_graficos_3d, parent=self)
+        dialog = Grafico3DDialog(banco_graficos_3d=self.documento.banco_graficos_3d, is_dark=self.is_dark_theme, parent=self)
         if dialog.exec():
             novo_grafico_3d = dialog.get_dados_grafico_3d() 
             
@@ -1219,8 +1254,9 @@ class AbaConteudo(QWidget):
             QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione um gráfico 3D (não um bin) para editar.")
             return
         
-        dialog = Grafico3DDialog(grafico=grafico_original, 
-                                 banco_graficos_3d=self.documento.banco_graficos_3d, 
+        dialog = Grafico3DDialog(grafico=grafico_original,
+                                 banco_graficos_3d=self.documento.banco_graficos_3d,
+                                 is_dark=self.is_dark_theme, # <-- LINHA ADICIONADA
                                  parent=self)
         
         if dialog.exec():
@@ -1306,8 +1342,9 @@ class AbaConteudo(QWidget):
             QMessageBox.warning(self, "Ação Inválida", "Por favor, selecione um gráfico (não um bin) para editar.")
             return
         
-        dialog = ChartDialog(grafico=grafico_original, 
-                             banco_graficos=self.documento.banco_graficos, 
+        dialog = ChartDialog(grafico=grafico_original,
+                             banco_graficos=self.documento.banco_graficos,
+                             is_dark=self.is_dark_theme,  # <-- LINHA ADICIONADA
                              parent=self)
         
         if dialog.exec():

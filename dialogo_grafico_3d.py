@@ -96,7 +96,7 @@ class SeriesColorButton(QPushButton):
 
 # --- PAINEL 1: DADOS POR PONTOS (Árvore) ---
 class PointDataSourcePanel(QWidget):
-    def __init__(self, on_change):
+    def __init__(self, on_change, is_dark: bool = False, icon_path: str = "."):
         super().__init__()
         self.on_change = on_change
         
@@ -108,7 +108,12 @@ class PointDataSourcePanel(QWidget):
         tree_layout = QVBoxLayout(data_group)
         
         self.import_btn = QPushButton("Importar Pontos (CSV/Excel)...")
-        self.import_btn.setIcon(QtGui.QIcon.fromTheme("document-open"))
+        
+        # --- INÍCIO DA CORREÇÃO (Ícone Minimalista) ---
+        suffix = "-white" if is_dark else ""
+        self.import_btn.setIcon(QtGui.QIcon(os.path.join(icon_path, f"browser{suffix}.png")))
+        # --- FIM DA CORREÇÃO ---
+        
         self.import_btn.clicked.connect(self._import_point_file)
         tree_layout.addWidget(self.import_btn)
         
@@ -325,7 +330,7 @@ class PointDataSourcePanel(QWidget):
 
 # --- PAINEL 2: DADOS POR GRADE (Tabela) ---
 class GridDataSourcePanel(QWidget):
-    def __init__(self, on_change):
+    def __init__(self, on_change, is_dark: bool = False, icon_path: str = "."):
         super().__init__()
         self.on_change = on_change
         
@@ -387,7 +392,12 @@ class GridDataSourcePanel(QWidget):
         form_layout.addRow(color_layout)
         
         self.import_btn = QPushButton("Importar Matriz (CSV/Excel)...")
-        self.import_btn.setIcon(QtGui.QIcon.fromTheme("document-open"))
+        
+        # --- INÍCIO DA CORREÇÃO (Ícone Minimalista) ---
+        suffix = "-white" if is_dark else ""
+        self.import_btn.setIcon(QtGui.QIcon(os.path.join(icon_path, f"browser{suffix}.png")))
+        # --- FIM DA CORREÇÃO ---
+        
         self.import_btn.clicked.connect(self._import_grid_file)
         form_layout.addRow(self.import_btn)
         
@@ -865,7 +875,7 @@ class SettingsPanel(QWidget):
 
 class Grafico3DDialog(QDialog):
     
-    def __init__(self, grafico: Grafico3D = None, banco_graficos_3d: list[Grafico3D] = None, parent: QWidget = None):
+    def __init__(self, grafico: Grafico3D = None, banco_graficos_3d: list[Grafico3D] = None, is_dark: bool = False, parent: QWidget = None):
         super().__init__(parent)
         self.setWindowTitle("Editor de Gráfico 3D (Matplotlib)")
         self.resize(1400, 800) 
@@ -875,7 +885,8 @@ class Grafico3DDialog(QDialog):
         self.grafico_final = grafico if grafico else Grafico3D()
         self.banco_graficos_3d = banco_graficos_3d if banco_graficos_3d else []
         
-        self.is_dark_theme = True 
+        self.is_dark = is_dark
+        self.ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
 
         main_layout = QVBoxLayout(self) 
         
@@ -894,8 +905,8 @@ class Grafico3DDialog(QDialog):
         
         self.settings_panel = SettingsPanel(self.trigger_redraw)
         
-        self.point_data_panel = PointDataSourcePanel(self.trigger_redraw)
-        self.grid_data_panel = GridDataSourcePanel(self.trigger_redraw)
+        self.point_data_panel = PointDataSourcePanel(self.trigger_redraw, self.is_dark, self.ICON_PATH)
+        self.grid_data_panel = GridDataSourcePanel(self.trigger_redraw, self.is_dark, self.ICON_PATH)
         
         self.data_stack = QStackedWidget()
         self.data_stack.addWidget(self.point_data_panel) # Index 0

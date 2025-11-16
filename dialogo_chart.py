@@ -118,7 +118,7 @@ class SeriesColorButton(QPushButton):
 
 class DataSourcePanel(QWidget):
     """Painel lateral esquerdo, focado apenas na entrada de dados."""
-    def __init__(self, on_change):
+    def __init__(self, on_change, is_dark: bool = False, icon_path: str = "."):
         super().__init__()
         self.on_change = on_change # Conectado ao trigger_redraw
         self.df = None
@@ -140,7 +140,8 @@ class DataSourcePanel(QWidget):
         
         # --- MODIFICAÇÃO (v54 - Suporte a Excel) ---
         self.load_file_btn = QPushButton('Carregar Dados...')
-        self.load_file_btn.setIcon(QtGui.QIcon.fromTheme("document-open"))
+        suffix = "-white" if is_dark else ""
+        self.load_file_btn.setIcon(QtGui.QIcon(os.path.join(icon_path, f"browser{suffix}.png")))
         self.load_file_btn.clicked.connect(self._load_data_file)
         
         top_data_layout.addWidget(self.dataset_cb)
@@ -1003,7 +1004,7 @@ class SettingsPanel(QWidget):
 
 class ChartDialog(QDialog):
     
-    def __init__(self, grafico: Grafico = None, banco_graficos: list[Grafico] = None, parent: QWidget = None):
+    def __init__(self, grafico: Grafico = None, banco_graficos: list[Grafico] = None, is_dark: bool = False, parent: QWidget = None):
         super().__init__(parent)
         self.setWindowTitle("Editor de Gráfico (Matplotlib)")
         self.resize(1400, 800) 
@@ -1012,6 +1013,9 @@ class ChartDialog(QDialog):
         self.grafico_original_para_edicao = grafico
         self.grafico_final = grafico if grafico else Grafico()
         self.banco_graficos = banco_graficos if banco_graficos else []
+
+        self.is_dark = is_dark 
+        self.ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons")
 
         main_layout = QVBoxLayout(self) 
         
@@ -1029,7 +1033,7 @@ class ChartDialog(QDialog):
         # Passa o 'trigger_redraw' para os painéis,
         # mas o botão 'Atualizar' se conecta diretamente ao 'redraw'.
         self.settings_panel = SettingsPanel(self.trigger_redraw)
-        self.data_panel = DataSourcePanel(self.trigger_redraw)
+        self.data_panel = DataSourcePanel(self.trigger_redraw, self.is_dark, self.ICON_PATH)
         self.settings_panel.update_btn.clicked.connect(self.redraw) # Força redraw
         # --- FIM DA MODIFICAÇÃO (v46) ---
         
