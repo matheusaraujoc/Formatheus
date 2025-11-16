@@ -8,12 +8,28 @@
 # 3. Adicionado "search_bar_visible" (padrão True) para a barra de busca.
 # 4. carregar_config() foi atualizado para mesclar essas novas chaves.
 #
+# ATUALIZAÇÃO (vX.X - Launcher):
+# 1. O CONFIG_FILE agora é salvo na pasta raiz (junto ao launcher),
+#    um nível acima da pasta /app, para sobreviver a atualizações.
+#
 
 import os
 import json
 from datetime import datetime
 
-CONFIG_FILE = "abnf_helper_config.json"
+# --- INÍCIO DA CORREÇÃO (Salvar na Raiz) ---
+# Define o caminho do arquivo de configuração para estar UM NÍVEL ACIMA
+# da pasta 'app', ou seja, na mesma pasta do laucher.py
+
+# __file__ é o caminho deste script (ex: C:/Projeto/app/gerenciador_config.py)
+# os.path.dirname(__file__) é a pasta 'app' (ex: C:/Projeto/app)
+# os.path.dirname(os.path.dirname(__file__)) é a pasta raiz (ex: C:/Projeto)
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(APP_DIR)
+
+CONFIG_FILE = os.path.join(ROOT_DIR, "abnf_helper_config.json")
+# --- FIM DA CORREÇÃO ---
+
 MAX_RECENT_PROJECTS = 10
 
 def get_default_config():
