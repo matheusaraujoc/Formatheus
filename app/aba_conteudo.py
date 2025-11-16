@@ -259,27 +259,29 @@ class AbaConteudo(QWidget):
         suffix = "-white" if is_dark else ""
         
         # --- INÍCIO DA CORREÇÃO ---
-        # Usa caminhos relativos e os nomes de arquivo corretos
+        # Usa self.ICON_PATH para garantir o caminho absoluto
         
         # Nomes da captura de tela
-        self.btn_desfazer.setIcon(QtGui.QIcon(f"assets/icons/undo{suffix}.png"))
-        self.btn_refazer.setIcon(QtGui.QIcon(f"assets/icons/redo{suffix}.png"))
+        self.btn_desfazer.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"undo{suffix}.png")))
+        self.btn_refazer.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"redo{suffix}.png")))
         
         # Nomes que você especificou (negrito, italico, sublinhado)
-        self.btn_negrito.setIcon(QtGui.QIcon(f"assets/icons/negrito{suffix}.png"))
-        self.btn_italico.setIcon(QtGui.QIcon(f"assets/icons/italico{suffix}.png"))
-        self.btn_sublinhado.setIcon(QtGui.QIcon(f"assets/icons/sublinhado{suffix}.png"))
+        self.btn_negrito.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"negrito{suffix}.png")))
+        self.btn_italico.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"italico{suffix}.png")))
+        self.btn_sublinhado.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"sublinhado{suffix}.png")))
         
         # Nomes da captura de tela
-        self.btn_quebra_pagina.setIcon(QtGui.QIcon(f"assets/icons/page_break{suffix}.png"))
-        self.btn_pagina_em_branco.setIcon(QtGui.QIcon(f"assets/icons/blank_page{suffix}.png"))
+        self.btn_quebra_pagina.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"page_break{suffix}.png")))
+        self.btn_pagina_em_branco.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"blank_page{suffix}.png")))
         # --- FIM DA CORREÇÃO ---
 
         for btn in self.lista_botoes_bin:
             if btn.objectName() == "btn_add_bin":
-                btn.setIcon(QtGui.QIcon(f"assets/icons/folder-plus{suffix}.png"))
+                # --- CORREÇÃO ADICIONAL AQUI ---
+                btn.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"folder-plus{suffix}.png")))
             elif btn.objectName() == "btn_del_bin":
-                btn.setIcon(QtGui.QIcon(f"assets/icons/trash{suffix}.png"))
+                # --- CORREÇÃO ADICIONAL AQUI ---
+                btn.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"trash{suffix}.png")))
 
         # Força a recriação das árvores de Bins para usar os novos ícones
         self.atualizar_bancos_visuais()
@@ -363,38 +365,40 @@ class AbaConteudo(QWidget):
             }
         """)
 
+        # --- INÍCIO DA CORREÇÃO 1: Sub-função _criar_layout_titulo_bin ---
         # Função auxiliar local para criar o layout do título do bin
         def _criar_layout_titulo_bin(titulo: str, add_slot, del_slot) -> QHBoxLayout:
             titulo_layout = QHBoxLayout()
             titulo_layout.addWidget(QLabel(titulo))
             titulo_layout.addStretch()
             
-            # --- INÍCIO DA MODIFICAÇÃO (Ícones Personalizados) ---
             suffix = "-white" if self.is_dark_theme else ""
             
             btn_add_bin = QToolButton()
-            icon_add = QtGui.QIcon(f"assets/icons/folder-plus{suffix}.png") 
+            # CORREÇÃO: Usar self.ICON_PATH
+            icon_add = QtGui.QIcon(os.path.join(self.ICON_PATH, f"folder-plus{suffix}.png")) 
             btn_add_bin.setIcon(icon_add)
             btn_add_bin.setToolTip("Criar novo bin (pasta)")
             btn_add_bin.clicked.connect(add_slot)
-            btn_add_bin.setObjectName("btn_add_bin") # <-- ADICIONADO
+            btn_add_bin.setObjectName("btn_add_bin")
             titulo_layout.addWidget(btn_add_bin)
             
             btn_del_bin = QToolButton()
-            icon_del = QtGui.QIcon(f"assets/icons/trash{suffix}.png") 
+            # CORREÇÃO: Usar self.ICON_PATH
+            icon_del = QtGui.QIcon(os.path.join(self.ICON_PATH, f"trash{suffix}.png")) 
             btn_del_bin.setIcon(icon_del)
             btn_del_bin.setToolTip("Remover bin selecionado")
             btn_del_bin.setProperty("cssClass", "destructive") 
             btn_del_bin.clicked.connect(del_slot)
-            btn_del_bin.setObjectName("btn_del_bin") # <-- ADICIONADO
+            btn_del_bin.setObjectName("btn_del_bin")
             titulo_layout.addWidget(btn_del_bin)
             
             # Adiciona os botões à lista para atualização do tema
             self.lista_botoes_bin.append(btn_add_bin)
             self.lista_botoes_bin.append(btn_del_bin)
-            # --- FIM DA MODIFICAÇÃO ---
             
             return titulo_layout
+        # --- FIM DA CORREÇÃO 1 ---
 
 
         # --- Aba Tabelas ---
@@ -620,57 +624,64 @@ class AbaConteudo(QWidget):
         self.label_capitulo_atual = QLabel("Selecione um tópico para editar")
         self.label_capitulo_atual.setProperty("cssClass", "titulo")
         
+        # --- INÍCIO DA CORREÇÃO 2: Barra de Ferramentas de Formatação ---
         format_toolbar = QHBoxLayout()
         format_toolbar.addWidget(QLabel("Formatação:"))
         
         self.btn_desfazer = QToolButton()
-        self.btn_desfazer.setIcon(QtGui.QIcon("assets/icons/undo.png"))
+        # CORREÇÃO: Usar self.ICON_PATH
+        self.btn_desfazer.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, "undo.png")))
         self.btn_desfazer.setToolTip("Desfazer (Ctrl+Z)")
         self.btn_desfazer.setEnabled(False)
         format_toolbar.addWidget(self.btn_desfazer)
 
         self.btn_refazer = QToolButton()
-        self.btn_refazer.setIcon(QtGui.QIcon("assets/icons/redo.png"))
+        # CORREÇÃO: Usar self.ICON_PATH
+        self.btn_refazer.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, "redo.png")))
         self.btn_refazer.setToolTip("Refazer (Ctrl+Y)")
         self.btn_refazer.setEnabled(False)
         format_toolbar.addWidget(self.btn_refazer)
         
-        # --- INÍCIO DA ADIÇÃO (vX.X - Formatação de Texto) ---
         self.btn_negrito = QToolButton()
-        self.btn_negrito.setIcon(QtGui.QIcon("assets/icons/negrito.png"))
+        # CORREÇÃO: Usar self.ICON_PATH
+        self.btn_negrito.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, "negrito.png")))
         self.btn_negrito.setToolTip("Negrito (Ctrl+B)")
         self.btn_negrito.setShortcut("Ctrl+B")
         self.btn_negrito.clicked.connect(self._aplicar_formatacao_negrito)
         format_toolbar.addWidget(self.btn_negrito)
 
         self.btn_italico = QToolButton()
-        self.btn_italico.setIcon(QtGui.QIcon("assets/icons/italico.png"))
+        # CORREÇÃO: Usar self.ICON_PATH
+        self.btn_italico.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, "italico.png")))
         self.btn_italico.setToolTip("Itálico (Ctrl+I)")
         self.btn_italico.setShortcut("Ctrl+I")
         self.btn_italico.clicked.connect(self._aplicar_formatacao_italico)
         format_toolbar.addWidget(self.btn_italico)
 
         self.btn_sublinhado = QToolButton()
-        self.btn_sublinhado.setIcon(QtGui.QIcon("assets/icons/sublinhado.png"))
+        # CORREÇÃO: Usar self.ICON_PATH
+        self.btn_sublinhado.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, "sublinhado.png")))
         self.btn_sublinhado.setToolTip("Sublinhado (Ctrl+U)")
         self.btn_sublinhado.setShortcut("Ctrl+U")
         self.btn_sublinhado.clicked.connect(self._aplicar_formatacao_sublinhado)
         format_toolbar.addWidget(self.btn_sublinhado)
-        # --- FIM DA ADIÇÃO ---
         
         self.btn_quebra_pagina = QToolButton()
-        self.btn_quebra_pagina.setIcon(QtGui.QIcon("assets/icons/page_break.png")) 
+        # CORREÇÃO: Usar self.ICON_PATH
+        self.btn_quebra_pagina.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, "page_break.png"))) 
         self.btn_quebra_pagina.setToolTip("Inserir Quebra de Página (Ctrl+Enter)")
         self.btn_quebra_pagina.clicked.connect(self._inserir_quebra_pagina)
         format_toolbar.addWidget(self.btn_quebra_pagina)
         
         self.btn_pagina_em_branco = QToolButton()
-        self.btn_pagina_em_branco.setIcon(QtGui.QIcon("assets/icons/blank_page.png"))
+        # CORREÇÃO: Usar self.ICON_PATH
+        self.btn_pagina_em_branco.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, "blank_page.png")))
         self.btn_pagina_em_branco.setToolTip("Inserir Página em Branco")
         self.btn_pagina_em_branco.clicked.connect(self._inserir_pagina_em_branco)
         format_toolbar.addWidget(self.btn_pagina_em_branco)
         
         format_toolbar.addStretch()
+        # --- FIM DA CORREÇÃO 2 ---
         
         self.editor_capitulo = EditorConteudo(aba_conteudo_parent=self) 
         self.editor_capitulo.textChanged.connect(self._on_editor_text_changed)
