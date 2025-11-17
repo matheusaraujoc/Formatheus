@@ -129,9 +129,10 @@ class FirebaseManager:
             print(f"Erro ao buscar planos: {e}")
             return [] # Retorna lista vazia em caso de erro
 
-    def create_license(self, email: str, plan_id: str):
+    def create_license(self, email: str, plan_id: str, expiration_date=None):
         """
         Cria uma nova licença no Firestore.
+        AGORA INCLUI UMA DATA DE EXPIRAÇÃO OPCIONAL.
         """
         try:
             # 1. Gerar a chave (ex: FMT-A1B2C3D4-E5F6G7H8)
@@ -146,6 +147,17 @@ class FirebaseManager:
                 "created_at": firestore.SERVER_TIMESTAMP,
                 "active_devices": {} # Inicia vazio
             }
+            
+            # --- INÍCIO DA ADIÇÃO ---
+            # Adiciona a data de expiração SOMENTE se ela for fornecida
+            if expiration_date:
+                # Converte o objeto 'date' do Python para um 'datetime' do Firebase
+                data["expires_at"] = datetime(
+                    expiration_date.year, 
+                    expiration_date.month, 
+                    expiration_date.day
+                )
+            # --- FIM DA ADIÇÃO ---
 
             # 3. Salvar no Firestore usando a chave como ID
             self.db.collection("licenses").document(license_key).set(data)
