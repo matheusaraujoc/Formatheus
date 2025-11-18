@@ -498,3 +498,10 @@ Seu ambiente está pronto. O Painel Admin (`admin_login.py`) funciona localmente
 
 ## Comandos Uteis
 
+cd ..
+
+pip install -r requirements.txt
+
+.\venv\Scripts\activate
+
+cd functions

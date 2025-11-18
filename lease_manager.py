@@ -34,10 +34,10 @@ def resource_path(relative_path):
 LEASE_FILE_NAME = resource_path("license.lease")
 LEASE_DURATION_DAYS = 7 # O "lease" offline expira após 7 dias
 
-# IMPORTANTE: Esta é a "pimenta" (segredo) do seu app.
+# IMPORTANTE: Esta é a "pimenta" (segredo) do app.
 # Mude para qualquer string aleatória e complexa.
 # Ela é compilada no .exe e impede que um 'lease' seja copiado para outra máquina.
-PEPPER = b'formatheus-!@#$-abnt-key-pepper-456' 
+PEPPER = b'63YAFUVEWRW4NCR3DF5E4OST3R53Q2' 
 
 # --- Funções de Criptografia ---
 

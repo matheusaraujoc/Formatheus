@@ -4,6 +4,8 @@ from firebase_admin import firestore
 from firebase_functions import https_fn
 from datetime import datetime, timezone
 import uuid
+import os
+import boto3
 
 # Importa o tipo Timestamp para checagem (embora o SDK geralmente o converta)
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -222,3 +224,109 @@ def replace_device(req: https_fn.CallableRequest):
         print(f"Erro inesperado em replace_device: {e}")
         return {"status": "error", "message": "Ocorreu um erro interno ao substituir o dispositivo."}
     # --- FIM DA CORREÇÃO 2 ---
+
+
+# DOWNLOAD DE VERSÕES DO R2
+
+@https_fn.on_call(
+    secrets=["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"] # <-- Diz ao Firebase para carregar nossos segredos
+)
+def get_download_url(req: https_fn.CallableRequest):
+    """
+    Verifica a licença (novamente) e, se for válida, gera uma URL
+    de download segura e temporária do Cloudflare R2.
+    
+    Recebe: { license_key: "...", device_id: "...", file_version: "1.0.0" }
+    """
+    
+    # 1. PEGAR OS DADOS DA REQUISIÇÃO
+    data = req.data
+    license_key = data.get("license_key")
+    device_id = data.get("device_id")
+    file_version = data.get("file_version") # Versão que o cliente quer baixar
+
+    if not all([license_key, device_id, file_version]):
+        raise https_fn.HttpsError(
+            code="invalid-argument",
+            message="Chave, ID do dispositivo e versão do arquivo são obrigatórios."
+        )
+
+    db = firestore.client()
+    lic_ref = db.collection("licenses").document(license_key)
+
+    # 2. VERIFICAR A LICENÇA (VERIFICAÇÃO RÁPIDA)
+    # (Não precisamos de uma transação completa aqui, apenas uma leitura)
+    try:
+        lic_doc = lic_ref.get()
+        if not lic_doc.exists:
+            raise https_fn.HttpsError(code="not-found", message="Chave de licença inválida.")
+        
+        lic_data = lic_doc.to_dict()
+        
+        if lic_data.get("status") != "active":
+            raise https_fn.HttpsError(code="permission-denied", message="Esta licença não está ativa.")
+        
+        expires_at = lic_data.get("expires_at")
+        if expires_at and expires_at < datetime.now(timezone.utc):
+            raise https_fn.HttpsError(code="permission-denied", message="Esta licença expirou.")
+            
+        # Verifica se este dispositivo está realmente na licença
+        if device_id not in lic_data.get("active_devices", {}):
+            raise https_fn.HttpsError(code="permission-denied", message="Este dispositivo não está ativado para esta licença.")
+
+    except https_fn.HttpsError as e:
+        return {"status": "error", "message": e.message}
+    except Exception as e:
+        print(f"Erro ao verificar licença para download: {e}")
+        return {"status": "error", "message": "Erro ao verificar licença."}
+
+    # 3. GERAR A URL SEGURA DO R2
+    try:
+        # --- PREENCHA SEUS DADOS DO R2 AQUI ---
+        # (Você encontra isso no painel do R2)
+        R2_ENDPOINT_URL = "https://09ac22087797a74aa1e2fb28d354c5f8.r2.cloudflarestorage.com"
+        R2_BUCKET_NAME = "formatheus-releases"
+        # ----------------------------------------
+        
+        # Constrói o nome do arquivo de teste
+        # (No futuro, você pode pegar isso do Firestore)
+        file_name = f"app_v{file_version}.zip" 
+
+        # Pega as chaves secretas que o Firebase injetou
+        access_key_id = os.environ.get("R2_ACCESS_KEY_ID")
+        secret_access_key = os.environ.get("R2_SECRET_ACCESS_KEY")
+        
+        if not all([access_key_id, secret_access_key, R2_ENDPOINT_URL, R2_BUCKET_NAME]):
+            raise https_fn.HttpsError(code="internal", message="Configuração do servidor de download incompleta.")
+
+        # Inicializa o cliente Boto3 (o "telefone" para o R2)
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=R2_ENDPOINT_URL,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            region_name="auto" # R2 usa 'auto'
+        )
+
+        # Gera a URL assinada (link temporário)
+        # Válido por 300 segundos (5 minutos)
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': R2_BUCKET_NAME, 'Key': file_name},
+            ExpiresIn=300 
+        )
+
+        # 4. ENVIA A URL DE VOLTA PARA O LAUNCHER
+        return {
+            "status": "success",
+            "download_url": presigned_url,
+            "file_name": file_name
+        }
+
+    except Exception as e:
+        print(f"Erro ao gerar URL do R2: {e}")
+        # (Se o erro for 'ClientError: Not Found', o arquivo .zip não existe no bucket)
+        if "Not Found" in str(e):
+             return {"status": "error", "message": f"A versão do arquivo '{file_version}' não foi encontrada no servidor."}
+        
+        return {"status": "error", "message": "Não foi possível obter o link de download."}
