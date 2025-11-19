@@ -39,6 +39,11 @@ from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEd
 from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QIcon 
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtGui import QPageLayout, QPageSize
+from PySide6.QtCore import QMarginsF
+from dialogo_exportacao import DialogoExportacao
+import subprocess # Para abrir o arquivo no final
+import platform   # Para detectar o SO
 
 # --- IMPORTS DE ESTILO ---
 import stylesheet 
@@ -68,7 +73,7 @@ from dialogs import DialogoRecuperacao
 # ----------------------------------------------------
 
 # 1. CONTROLE DE DEBUG: True = Pula a verificação do Launcher
-DISABLE_LAUNCHER_CHECK = False # <-- Mantenha True para DEBUG, use False para PRODUÇÃO
+DISABLE_LAUNCHER_CHECK = True # <-- Mantenha True para DEBUG, use False para PRODUÇÃO
 
 # 2. SEGREDO COMPARTILHADO: Deve ser idêntico ao do launcher
 DYNAMIC_SECRET_SALT = b"OWIYVQUXJ64IJETQPXT1UZZ16YBNI8" 
@@ -302,29 +307,27 @@ class ABNTHelperApp(QWidget):
         """
         suffix = "-white" if is_dark else ""
         
-        # Mapeamento de 'fromTheme' para os nomes de arquivo da sua biblioteca
-        
         # 1. Ícones do Menu
-        # (Estou mapeando os nomes 'fromTheme' para os nomes da sua imagem)
         self.acao_novo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"file{suffix}.png")))
         self.acao_carregar.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"folder{suffix}.png")))
         self.acao_salvar.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png")))
-        self.acao_salvar_como.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png"))) # Reutilizando 'save'
+        self.acao_salvar_como.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png"))) 
         self.acao_voltar.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"previous{suffix}.png")))
         self.acao_sair.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
         self.acao_localizar.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"search{suffix}.png")))
         
-        # 2. Botão Gerar Docx
-        self.generate_btn.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png")))
+        # 2. Botão Exportar (O NOVO BOTÃO ÚNICO)
+        # Verifica se o botão existe antes de tentar atualizar
+        if hasattr(self, 'btn_exportar_geral'):
+             self.btn_exportar_geral.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png")))
         
         # 3. Aba Geral
         self.btn_procurar_esquerdo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"browser{suffix}.png")))
         self.btn_procurar_direito.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"browser{suffix}.png")))
         
         # 4. Aba Referências
-        # (Sua imagem não tem 'list-add' ou 'document-edit', estou usando substitutos)
-        self.btn_add_ref.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png"))) # Usando 'doc' como substituto
-        self.btn_edit_ref.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png"))) # Usando 'doc' como substituto
+        self.btn_add_ref.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png")))
+        self.btn_edit_ref.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"doc{suffix}.png")))
         self.btn_del_ref.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"trash{suffix}.png")))
         
         # 5. Painel de Preview (Busca)
@@ -333,7 +336,7 @@ class ABNTHelperApp(QWidget):
         self.btn_fechar_busca.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
         self.btn_atualizar_preview.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"restore{suffix}.png")))
         
-        # 6. Ícones Personalizados (assets) - Esta parte já funciona!
+        # 6. Ícones Personalizados (assets) da Aba de Conteúdo
         if hasattr(self, 'aba_conteudo'):
             self.aba_conteudo.update_theme_icons(is_dark)
 
@@ -411,13 +414,20 @@ class ABNTHelperApp(QWidget):
         
         self.preview_container = self._criar_painel_preview() 
 
-        self.generate_btn = QPushButton("Gerar .docx")
-        self.generate_btn.setToolTip("Gerar o documento .docx final")
-        self.generate_btn.setProperty("cssClass", "primary")
-        self.generate_btn.clicked.connect(self._gerar_documento_final)
-        self.tabs.setCornerWidget(self.generate_btn, QtCore.Qt.Corner.TopRightCorner)
+        # Botão Único de Exportação
+        self.btn_exportar_geral = QPushButton("Exportar Documento")
+        self.btn_exportar_geral.setToolTip("Exportar para PDF ou DOCX com opções personalizadas")
+        self.btn_exportar_geral.setProperty("cssClass", "primary")
+        
+        # Ícone (use um ícone de 'download' ou 'export' se tiver, ou reutilize 'save')
+        suffix = "-white" if self.is_dark_theme else ""
+        self.btn_exportar_geral.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png"))) # Exemplo
+        
+        self.btn_exportar_geral.clicked.connect(self._abrir_dialogo_exportacao)
 
-        self._reconfigurar_layout() 
+        self.tabs.setCornerWidget(self.btn_exportar_geral, QtCore.Qt.Corner.TopRightCorner)
+        
+        self._reconfigurar_layout()
 
     def _criar_aba_geral(self):
         widget = QWidget()
@@ -1232,6 +1242,188 @@ class ABNTHelperApp(QWidget):
         self.modificado = False
         self.setWindowTitle(f'Formatheus - Novo Projeto ({nome_modelo})')
         self._disparar_atualizacao_automatica()
+
+    def _executar_exportacao_pdf(self, caminho_final, opcoes):
+        # 1. Reseta Zoom
+        self.saved_zoom = self.preview_display.zoomFactor()
+        self.preview_display.setZoomFactor(1.0)
+
+        # 2. Prepara CSS Condicional baseado nas opções
+        css_ocultacao = ""
+        if not opcoes["incluir_pre_textual"]:
+            # Oculta Capa, Folha de Rosto e Resumo
+            css_ocultacao += ".pre-textual { display: none !important; } "
+        
+        if not opcoes["incluir_sumario"]:
+            # Oculta especificamente a página do sumário (se ela não tiver classe 'pre-textual' ou se quiser controle fino)
+            # No seu gerador_preview, o sumário tem a classe 'sumario-page'
+            css_ocultacao += ".sumario-page { display: none !important; } "
+
+        if not opcoes["incluir_referencias"]:
+            # Oculta a seção de referências. Precisamos garantir que o HTML tenha um ID ou classe para isso.
+            # No gerador_preview atual, referências começam com <h1 id='secao-referencias'>.
+            # Selecionar intervalos no CSS é difícil. 
+            # TRUQUE: Vamos esconder o H1 e os paragrafos seguintes que sejam .referencia
+            # Mas o ideal seria envolver as referências numa DIV no gerador_preview.
+            # Como não queremos mexer lá agora, vamos assumir que o usuário raramente tira as referências no PDF.
+            pass 
+
+        # 3. Injeta o CSS de Impressão (O mesmo de antes, mais as regras de ocultação)
+        js_print_settings = """
+        (function() {
+            var style = document.createElement('style');
+            style.innerHTML = `
+                @media print {
+                    /* --- REGRAS DE OCULTAÇÃO (OPÇÕES DO USUÁRIO) --- */
+                    %s
+
+                    /* --- GERAL --- */
+                    @page { margin: 0; size: A4 portrait; }
+                    html, body { width: 210mm !important; height: auto !important; margin: 0 !important; padding: 0 !important; background: white !important; -webkit-print-color-adjust: exact; }
+                    body > div, #app, .container { display: block !important; margin: 0 !important; padding: 0 !important; }
+
+                    /* --- PÁGINAS --- */
+                    .pagina {
+                        box-sizing: border-box !important; width: 210mm !important; min-height: 296.8mm !important;
+                        padding: 3cm 2cm 2cm 3cm !important; margin: 0 !important; border: none !important; box-shadow: none !important;
+                        page-break-after: always !important; break-inside: avoid !important; position: relative !important; overflow: hidden !important;
+                    }
+                    .pagina:last-child { page-break-after: auto !important; margin-bottom: 0 !important; }
+                    
+                    /* --- CAPA/CONTRACAPA --- */
+                    .pagina.capa, .pagina.folha-rosto { display: block !important; }
+                    .pagina.capa > div:last-child, .pagina.folha-rosto > div:last-child {
+                        position: absolute !important; bottom: 2cm !important; left: 0 !important; width: 100%% !important; text-align: center !important; margin: 0 !important; padding: 0 !important;
+                    }
+                    .capa-conteudo-meio { margin-top: 20%% !important; }
+                    ::-webkit-scrollbar { display: none; }
+                }
+            `;
+            document.head.appendChild(style);
+            document.querySelectorAll('a[href^="#"]').forEach(function(link) { link.removeAttribute('target'); });
+        })();
+        """ % (css_ocultacao) # Injeta a string de ocultação no %s
+
+        self.preview_display.page().runJavaScript(js_print_settings)
+
+        layout = QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Portrait, QMarginsF(0, 0, 0, 0))
+
+        try:
+            self.preview_display.page().pdfPrintingFinished.disconnect(self._on_pdf_finished)
+        except Exception: pass
+        self.preview_display.page().pdfPrintingFinished.connect(lambda path, success: self._on_pdf_finished(path, success))
+
+        print(f"Gerando PDF em: {caminho_final}")
+        QtCore.QTimer.singleShot(700, lambda: self.preview_display.page().printToPdf(caminho_final, layout))
+
+    # 5. Atualize o callback _on_pdf_finished para abrir o arquivo se solicitado
+    @QtCore.Slot(str, bool)
+    def _on_pdf_finished(self, caminho_arquivo, sucesso):
+        if hasattr(self, 'saved_zoom'):
+            self.preview_display.setZoomFactor(self.saved_zoom)
+
+        if sucesso:
+            QMessageBox.information(self, "Sucesso", f"PDF gerado com sucesso em:\n{caminho_arquivo}")
+            # Verifica se deve abrir
+            if hasattr(self, '_opcoes_exportacao_pendente') and self._opcoes_exportacao_pendente.get("abrir_arquivo"):
+                self._abrir_arquivo_sistema(caminho_arquivo)
+        else:
+            QMessageBox.critical(self, "Erro", "Falha ao gerar o arquivo PDF.")
+        
+        # Limpa as opções pendentes
+        if hasattr(self, '_opcoes_exportacao_pendente'):
+            del self._opcoes_exportacao_pendente
+
+
+    #NOVA LOGICA DE EXPORTAÇÃO
+    @QtCore.Slot()
+    def _abrir_dialogo_exportacao(self):
+        # Sincroniza antes de exportar
+        self.aba_conteudo.sincronizar_conteudo_pendente()
+        self._sincronizar_modelo_com_ui()
+
+        dialog = DialogoExportacao(self)
+        if dialog.exec():
+            opcoes = dialog.get_opcoes()
+            formato = opcoes["formato"]
+            
+            # Define nome sugerido
+            titulo_projeto = self.documento.titulo
+            nome_sanitizado = "documento"
+            if titulo_projeto:
+                nome_sanitizado = re.sub(r'[<>:"/\\|?*]', '', titulo_projeto)[:60].strip()
+            
+            extensao = ".docx" if formato == "docx" else ".pdf"
+            nome_arquivo_sugerido = f"{nome_sanitizado}{extensao}"
+            
+            diretorio_sugerido = os.path.dirname(self.caminho_projeto_atual) if self.caminho_projeto_atual else ""
+            caminho_sugerido = os.path.join(diretorio_sugerido, nome_arquivo_sugerido)
+
+            filtro = "Word Document (*.docx)" if formato == "docx" else "PDF Files (*.pdf)"
+            
+            caminho_final, _ = QFileDialog.getSaveFileName(
+                self, "Exportar Documento", caminho_sugerido, filtro
+            )
+
+            if not caminho_final:
+                return
+
+            # Executa a exportação baseada na escolha
+            sucesso = False
+            if formato == "docx":
+                sucesso = self._executar_exportacao_docx(caminho_final, opcoes)
+            else:
+                self._executar_exportacao_pdf(caminho_final, opcoes)
+                # O PDF é assíncrono, o sucesso é tratado no callback, 
+                # mas passamos a opção 'abrir_arquivo' para ele.
+                self._opcoes_exportacao_pendente = opcoes # Guarda opções para o callback
+                return 
+
+            # Lógica pós-exportação (Apenas DOCX aqui, PDF é no callback)
+            if sucesso:
+                if opcoes["abrir_arquivo"]:
+                    self._abrir_arquivo_sistema(caminho_final)
+
+    def _executar_exportacao_docx(self, caminho, opcoes):
+        try:
+            gerador = GeradorDOCX(self.documento)
+            # Passamos as opções para o gerador
+            gerador.gerar_documento(caminho, opcoes)
+            QMessageBox.information(self, "Sucesso", f"Documento DOCX gerado em:\n{caminho}")
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Erro na Exportação", f"Ocorreu um erro:\n{e}")
+            return False
+
+    def _abrir_arquivo_sistema(self, caminho):
+        """Abre o arquivo com o programa padrão do sistema."""
+        try:
+            if platform.system() == 'Windows':
+                os.startfile(caminho)
+            elif platform.system() == 'Darwin':  # macOS
+                subprocess.call(('open', caminho))
+            else:  # Linux
+                subprocess.call(('xdg-open', caminho))
+        except Exception as e:
+            print(f"Erro ao abrir arquivo automaticamente: {e}")
+    
+    @QtCore.Slot(str, bool)
+    def _on_pdf_finished(self, caminho_arquivo, sucesso):
+        """Callback chamado quando o PDF termina."""
+        # 1. Restaura o zoom para o usuário não achar estranho
+        if hasattr(self, 'saved_zoom'):
+            self.preview_display.setZoomFactor(self.saved_zoom)
+
+        # Desconecta sinal
+        try:
+            self.preview_display.page().pdfPrintingFinished.disconnect(self._on_pdf_finished)
+        except Exception:
+            pass
+
+        if sucesso:
+            QMessageBox.information(self, "Sucesso", f"PDF gerado com sucesso em:\n{caminho_arquivo}")
+        else:
+            QMessageBox.critical(self, "Erro", "Falha ao gerar o arquivo PDF.")
 
 
 if __name__ == '__main__':

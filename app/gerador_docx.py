@@ -99,50 +99,73 @@ class GeradorDOCX:
             if word is not None:
                 word.Quit()
 
-    def gerar_documento(self, caminho_arquivo: str):
+    # No método gerar_documento, adicione o parâmetro opcoes
+    def gerar_documento(self, caminho_arquivo: str, opcoes: dict = None):
+        # Se não vier opções, assume tudo True (padrão legado)
+        if opcoes is None:
+            opcoes = {
+                "incluir_pre_textual": True, 
+                "incluir_sumario": True, 
+                "incluir_referencias": True
+            }
+
         if self.regras.is_artigo:
-            self._gerar_artigo(caminho_arquivo)
+            self._gerar_artigo(caminho_arquivo, opcoes)
         else:
-            self._gerar_trabalho_academico(caminho_arquivo)
+            self._gerar_trabalho_academico(caminho_arquivo, opcoes)
 
-    def _gerar_trabalho_academico(self, caminho_arquivo: str):
+    def _gerar_trabalho_academico(self, caminho_arquivo: str, opcoes: dict):
         
-        # Seção 1: Capa (é a self.doc.sections[0])
-        self._renderizar_capa() 
-        
-        # Seção 2: Folha de Rosto
-        section_rosto = self.doc.add_section(WD_SECTION.NEW_PAGE)
-        # Desvincula o rodapé da Seção 2 (Folha de Rosto) da Seção 1 (Capa)
-        section_rosto.footer.is_linked_to_previous = False
-        self._renderizar_folha_rosto(section_rosto) # Passa a seção como argumento
+        # 1. Pré-Textuais (Capa, Folha de Rosto, Resumo)
+        if opcoes.get("incluir_pre_textual", True):
+            self._renderizar_capa() 
+            
+            section_rosto = self.doc.add_section(WD_SECTION.NEW_PAGE)
+            section_rosto.footer.is_linked_to_previous = False
+            self._renderizar_folha_rosto(section_rosto)
 
-        # Seção 3: Resumo
-        section_resumo = self.doc.add_section(WD_SECTION.NEW_PAGE)
-        # Desvincula o rodapé da Seção 3 (Resumo)
-        section_resumo.footer.is_linked_to_previous = False
-        self._renderizar_resumo()
+            section_resumo = self.doc.add_section(WD_SECTION.NEW_PAGE)
+            section_resumo.footer.is_linked_to_previous = False
+            self._renderizar_resumo()
+        else:
+            # Se pular pré-textual, removemos a primeira seção padrão do docx vazio 
+            # ou configuramos ela para começar o conteúdo. 
+            # Simplificação: apenas não chamamos os métodos de renderização, 
+            # mas a primeira seção existe.
+            pass
 
-        # Seção 4: Conteúdo principal (onde a numeração começa)
-        section_main = self.doc.add_section(WD_SECTION.NEW_PAGE)
-        # Desvincula o rodapé da Seção 4 (Conteúdo)
-        section_main.footer.is_linked_to_previous = False
+        # 2. Conteúdo Principal
+        # Se houver pré-textual, cria nova seção. Se não, usa a atual/nova.
+        if opcoes.get("incluir_pre_textual", True):
+            section_main = self.doc.add_section(WD_SECTION.NEW_PAGE)
+            section_main.footer.is_linked_to_previous = False
+            self._set_page_numbering(section_main) 
+        else:
+            # Se não tem capa, a numeração começa na primeira folha
+            section_main = self.doc.sections[0]
+            self._set_page_numbering(section_main)
+
+        # 3. Sumário
+        if opcoes.get("incluir_sumario", True):
+            self._renderizar_sumario()
         
-        # A numeração de página é aplicada APENAS na Seção 4
-        self._set_page_numbering(section_main) 
-        
-        self._renderizar_sumario()
+        # Renderiza o conteúdo (sempre incluído)
         self._renderizar_secoes_recursivamente(self.doc_abnt.estrutura_textual)
         
-        # Seção 5: Referências
-        section_refs = self.doc.add_section(WD_SECTION.NEW_PAGE)
-        # Mantém o cabeçalho/rodapé da seção anterior (com número de página)
-        section_refs.header.is_linked_to_previous = True
-        section_refs.footer.is_linked_to_previous = True
-        
-        self._renderizar_referencias()
+        # 4. Referências
+        if opcoes.get("incluir_referencias", True):
+            section_refs = self.doc.add_section(WD_SECTION.NEW_PAGE)
+            # Se tiver pré-textual, mantém vínculo. Se não, depende.
+            # Para simplificar, vinculamos ao anterior (que tem numeração).
+            section_refs.header.is_linked_to_previous = True
+            section_refs.footer.is_linked_to_previous = True
+            self._renderizar_referencias()
 
         self.doc.save(caminho_arquivo)
-        self._atualizar_sumario_com_word(caminho_arquivo)
+        
+        # Só atualiza sumário se ele foi incluído
+        if opcoes.get("incluir_sumario", True):
+            self._atualizar_sumario_com_word(caminho_arquivo)
 
     def _gerar_artigo(self, caminho_arquivo: str):
         section = self.doc.sections[0]
