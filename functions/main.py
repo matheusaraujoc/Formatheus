@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import uuid
 import os
 import boto3
+from packaging import version
 
 # Importa o tipo Timestamp para checagem (embora o SDK geralmente o converta)
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -330,3 +331,46 @@ def get_download_url(req: https_fn.CallableRequest):
              return {"status": "error", "message": f"A versão do arquivo '{file_version}' não foi encontrada no servidor."}
         
         return {"status": "error", "message": "Não foi possível obter o link de download."}
+    
+
+@https_fn.on_call()
+def check_for_update(req: https_fn.CallableRequest):
+    """
+    Verifica a versão mais recente no Firestore e compara com a do cliente.
+    
+    Recebe: { "current_version": "1.0.0" }
+    Retorna: { "status": "...", "latest_info": { ... } }
+    """
+    
+    data = req.data
+    current_version_str = data.get("current_version", "0.0.0")
+    
+    try:
+        db = firestore.client()
+        
+        # 1. Pega o documento 'latest_release' que você criou no Firestore
+        release_ref = db.collection("app_meta").document("latest_release")
+        release_doc = release_ref.get()
+        
+        if not release_doc.exists:
+            raise https_fn.HttpsError(code="not-found", message="Documento de 'latest_release' não encontrado.")
+            
+        latest_info = release_doc.to_dict()
+        # latest_info agora é algo como:
+        # { "version": "1.0.1", "release_notes": "...", "is_mandatory": false }
+        
+        latest_version_str = latest_info.get("version", "0.0.0")
+
+        # 2. Compara as versões usando a biblioteca 'packaging'
+        # Ela entende que "1.0.1" > "1.0.0" e "1.10.0" > "1.9.0"
+        update_available = version.parse(latest_version_str) > version.parse(current_version_str)
+        
+        return {
+            "status": "success",
+            "update_available": update_available,
+            "latest_info": latest_info 
+        }
+
+    except Exception as e:
+        print(f"Erro ao checar atualização: {e}")
+        return {"status": "error", "message": str(e)}

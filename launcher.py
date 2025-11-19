@@ -1,29 +1,37 @@
 # laucher.py
-# v2.1 - Implementado download e descompactação real do R2
+# v2.2 - Implementado controle de versão (opcional/obrigatório)
 
 import sys
 import os
 import subprocess
 import json
 import zipfile
-import shutil # <-- Adicionado
+import shutil
 import tempfile
 from datetime import datetime
 import uuid 
 import platform 
 
+# --- NOVA IMPORTAÇÃO ---
+try:
+    from packaging import version
+except ImportError:
+    print("ERRO CRÍTICO: Biblioteca 'packaging' não encontrada.")
+    print("Execute: pip install packaging")
+    sys.exit(1)
+# --------------------
+
 # --- Importações do Projeto ---
 try:
     import firebase_client
     import lease_manager
-    import download_manager # <-- ADICIONADO
+    import download_manager 
 except ImportError as e:
     print(f"ERRO CRÍTICO: Não foi possível importar os módulos de licença: {e}")
     sys.exit(1)
 # -----------------------------
 
 def resource_path(relative_path):
-    """ Retorna o caminho absoluto para o recurso, funcionando em dev e no PyInstaller """
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -42,21 +50,16 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.join(ROOT_DIR, "app")
 LAUNCHER_CONFIG_FILE = resource_path("launcher_config.json") 
 CONTROLLER_EXE = os.path.join(ROOT_DIR, "controller.exe")
-# (Vamos assumir que o 'check_for_update' usará o Firebase, não o GitHub)
-# (Por enquanto, vamos desabilitar a checagem de versão)
-# UPDATE_JSON_URL = "https://..." 
 
 # --- 3. Função de Carregamento da UI ---
 def carregar_modulos_ui():
-    """
-    Importa PySide6 e qdarktheme APENAS quando a UI é necessária.
-    """
     try:
-        from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, 
-                                       QPushButton, QLabel, QMessageBox,
-                                       QLineEdit, QDialog, QListWidget, 
-                                       QDialogButtonBox, QListWidgetItem,
-                                       QProgressBar) # <-- ADICIONADO
+        from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
+                                     QPushButton, QLabel, QMessageBox,
+                                     QLineEdit, QDialog, QListWidget, 
+                                     QDialogButtonBox, QListWidgetItem,
+                                     QProgressBar, QPlainTextEdit, QSpacerItem,
+                                     QSizePolicy) # <-- Vários adicionados
         from PySide6.QtGui import QIcon, QPixmap, QFont
         from PySide6.QtCore import Qt, Slot, QObject, QThread, Signal, QDate 
     except ImportError:
@@ -74,7 +77,7 @@ def carregar_modulos_ui():
             QMessageBox, QIcon, QPixmap, Qt, Slot, QObject, QThread, 
             Signal, HAS_THEME_LIB, qdarktheme, QLineEdit, QDialog, 
             QListWidget, QDialogButtonBox, QListWidgetItem, QFont, QDate,
-            QProgressBar) # <-- Retorna o novo
+            QProgressBar, QHBoxLayout, QPlainTextEdit, QSpacerItem, QSizePolicy)
 
 
 # --- 4. Funções de Configuração e Verificação ---
@@ -110,32 +113,51 @@ def get_local_license_key(config):
 def get_hostname():
     return platform.node()
 
-def check_for_update(app_version: str):
+# ---
+# --- ⬇️⬇️ FUNÇÃO DE CHECK_FOR_UPDATE MODIFICADA ⬇️⬇️
+# ---
+def check_for_update_firebase(current_app_version: str):
     """
-    (Desativado por enquanto, pois o download é gerenciado 
-     pela função de licença/instalação)
+    Chama a nova função 'check_for_update' do Firebase.
     """
-    is_first_run = (app_version == "0.0.0")
-    print("[Launcher] Verificação de atualização do GitHub desativada.")
-    return None, is_first_run
-
+    print(f"[Launcher] Verificando servidor com versão local: {current_app_version}")
+    try:
+        payload = {"current_version": current_app_version}
+        response = firebase_client.call_firebase_function("check_for_update", payload)
+        
+        if response.get("status") == "success":
+            # Retorna (update_disponivel, infos_da_versao)
+            return response.get("update_available", False), response.get("latest_info")
+        else:
+            print(f"[Launcher] Erro ao verificar atualização: {response.get('message')}")
+            return False, None
+            
+    except Exception as e:
+        print(f"[Launcher] Falha crítica ao verificar atualização: {e}")
+        return False, None
+# ---
+# --- ⬆️⬆️ FIM DA MODIFICAÇÃO ⬆️⬆️
+# ---
 
 def get_app_launch_command():
     if not os.path.exists(APP_DIR):
         print("[Launcher] Erro: Pasta /app não encontrada. Não é possível iniciar.")
         return None
+    
+    main_app_path = None
     if getattr(sys, 'frozen', False):
-        app_exe = os.path.join(APP_DIR, "main_app.exe")
-        if not os.path.exists(app_exe):
-            print(f"[Launcher] Erro: Executável {app_exe} não encontrado.")
-            return None
-        return [app_exe]
+        main_app_path = os.path.join(APP_DIR, "main_app.exe")
     else:
-        app_script = os.path.join(APP_DIR, "main_app.py")
-        if not os.path.exists(app_script):
-            print(f"[Launcher] Erro: Script {app_script} não encontrado.")
-            return None
-        return [sys.executable, app_script]
+        main_app_path = os.path.join(APP_DIR, "main_app.py")
+
+    if not os.path.exists(main_app_path):
+         print(f"[Launcher] Erro: Arquivo principal '{main_app_path}' não encontrado.")
+         return None
+         
+    if getattr(sys, 'frozen', False):
+        return [main_app_path]
+    else:
+        return [sys.executable, main_app_path]
 
 # --- 5. Ponto de Entrada Principal ---
 
@@ -143,7 +165,6 @@ def main():
     """Função principal do Launcher."""
     
     # --- FASE 1: Verificação de Licença (Offline e Online) ---
-    
     print("[Launcher] Iniciando...")
     launcher_config = get_launcher_config()
     device_id = get_or_create_device_id(launcher_config)
@@ -156,39 +177,31 @@ def main():
     lease_data = lease_manager.read_lease(device_id)
 
     if lease_data:
-        # --- CENÁRIO B: Lease Encontrado (Verificação Offline) ---
         print("[Launcher] Lease local encontrado. Verificando validade...")
         lease_status, message = lease_manager.check_lease_validity(lease_data)
         
         if lease_status == "ok":
             print("[Launcher] Lease offline VÁLIDO.")
             is_activated = True
-            ui_mode = "update" # Próximo passo: checar atualizações (ou só rodar)
+            ui_mode = "check_update" # <-- MUDOU
             
         elif lease_status == "expired":
-            print(f"[Launcher] Lease expirado. {message}")
-            is_activated = False
-            ui_mode = "show_error"
             error_message = f"Sua licença expirou em {lease_data.get('real_expiry')}.\nPor favor, renove seu plano para continuar."
+            ui_mode = "show_error"
             
         elif lease_status == "stale":
             print("[Launcher] Lease offline venceu. Verificação online necessária.")
             ui_mode = "verify_online"
-
     else:
-        # --- CENÁRIO A/C: Lease NÃO Encontrado ---
         print("[Launcher] Nenhum lease local encontrado.")
         license_key = get_local_license_key(launcher_config)
         
         if license_key:
-            print("[Launcher] Chave local encontrada. Verificação online necessária.")
             ui_mode = "verify_online"
         else:
-            print("[Launcher] Nenhuma chave local. Aguardando ativação do usuário.")
             ui_mode = "activate"
 
     # --- FASE 2: Verificação Online (Se necessário) ---
-    
     if ui_mode == "verify_online":
         print("[Launcher] Contatando servidor de licenças...")
         license_key = get_local_license_key(launcher_config)
@@ -196,11 +209,7 @@ def main():
         if not license_key: 
              ui_mode = "activate"
         else:
-            payload = {
-                "license_key": license_key,
-                "device_id": device_id,
-                "hostname": get_hostname()
-            }
+            payload = { "license_key": license_key, "device_id": device_id, "hostname": get_hostname() }
             response = firebase_client.call_firebase_function("activate_device", payload)
             status = response.get("status")
 
@@ -208,62 +217,83 @@ def main():
                 print("[Launcher] Verificação online OK.")
                 lease_manager.write_lease(response['real_expiry'], device_id)
                 is_activated = True
-                ui_mode = "update" 
+                ui_mode = "check_update" # <-- MUDOU
             
             elif status == "limit_reached":
-                print("[Launcher] Limite de dispositivos atingido.")
                 is_activated = False
                 ui_mode = "replace_device" 
                 initial_response = response 
             
             else:
-                print(f"[Launcher] Falha na verificação da licença: {response.get('message')}")
                 is_activated = False
                 ui_mode = "show_error"
                 error_message = f"Sua licença não pôde ser validada:\n\n{response.get('message')}"
 
+    # ---
+    # --- ⬇️⬇️ FASE 3 MODIFICADA ⬇️⬇️
+    # ---
+    
     # --- FASE 3: Verificação de Atualização (Apenas se ativado) ---
     
-    update_info = None
-    is_first_run = False
-    app_version = launcher_config.get("app_version", "0.0.0")
-
-    if ui_mode == "update":
-        update_info, is_first_run = check_for_update(app_version) 
+    update_info = None # Informações da (versão, notas, etc.)
+    
+    if ui_mode == "check_update":
+        app_version = launcher_config.get("app_version", "0.0.0")
+        is_first_run = (app_version == "0.0.0")
         
-        if not update_info and not is_first_run:
-            print("[Launcher] Licença OK. Nenhuma atualização. Iniciando main_app...")
-            launch_command = get_app_launch_command()
-            if launch_command:
-                subprocess.Popen(launch_command)
-            else:
-                ui_mode = "install" 
-                is_first_run = True
+        update_available, latest_info = check_for_update_firebase(app_version)
+        
+        if not latest_info:
+            # Falhou em contatar o servidor de update
+            ui_mode = "show_error"
+            error_message = "Não foi possível contatar o servidor de atualização.\nVerifique sua internet e tente novamente."
+        
+        else:
+            # Servidor respondeu!
+            update_info = latest_info # Salva as infos da versão (ex: 1.0.1)
             
-            if ui_mode == "update": 
+            launch_command = get_app_launch_command()
+            
+            if is_first_run or not launch_command:
+                # Se é a primeira vez ou o app foi deletado, força instalação
+                print("[Launcher] Primeira execução ou app não encontrado. Forçando instalação.")
+                ui_mode = "install"
+            
+            elif update_available:
+                # Temos uma atualização!
+                print(f"[Launcher] Atualização encontrada: {app_version} -> {update_info.get('version')}")
+                ui_mode = "update"
+            
+            else:
+                # Licença OK, App existe, Sem atualização.
+                print("[Launcher] Licença OK. Nenhuma atualização. Iniciando main_app...")
+                subprocess.Popen(launch_command)
                 sys.exit(0) 
 
-    is_mandatory_update = update_info and update_info.get("mandatory", False)
-    
+    # ---
+    # --- ⬆️⬆️ FIM DA FASE 3 MODIFICADA ⬆️⬆️
+    # ---
+
     # --- FASE 4: Carregar a UI (Se necessário) ---
-    
     print(f"[Launcher] Ação de UI necessária: {ui_mode}")
 
     (QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, 
      QMessageBox, QIcon, QPixmap, Qt, Slot, QObject, QThread, 
      Signal, HAS_THEME_LIB, qdarktheme, QLineEdit, QDialog, 
      QListWidget, QDialogButtonBox, QListWidgetItem, QFont, QDate,
-     QProgressBar) = carregar_modulos_ui() 
+     QProgressBar, QHBoxLayout, QPlainTextEdit, QSpacerItem, 
+     QSizePolicy) = carregar_modulos_ui() 
     
     from download_manager import DownloadWorker
 
     if ui_mode == "show_error":
         temp_app = QApplication(sys.argv)
-        QMessageBox.critical(None, "Erro de Licença", error_message)
+        QMessageBox.critical(None, "Erro do Launcher", error_message)
         sys.exit(1)
         
     
     class DialogoDispositivos(QDialog):
+        # ... (Sem alterações) ...
         def __init__(self, device_list, parent=None):
             super().__init__(parent)
             self.setWindowTitle("Limite de Dispositivos Atingido")
@@ -298,16 +328,17 @@ def main():
             self.selected_device_id = selected_item.data(Qt.ItemDataRole.UserRole)
             self.accept()
     
-
+    # ---
+    # --- ⬇️⬇️ JANELA DO LAUNCHER MODIFICADA ⬇️⬇️
+    # ---
     class LauncherWindow(QWidget):
         def __init__(self, is_dark_theme=False, ui_mode="activate", 
-                     update_info=None, is_first_run=False, initial_response=None):
+                     update_info=None, initial_response=None):
             super().__init__()
             
             self.is_dark = is_dark_theme
             self.ui_mode = ui_mode 
-            self.update_info = update_info
-            self.is_first_run = is_first_run
+            self.update_info = update_info # Agora contém { "version": "...", "release_notes": "...", "is_mandatory": ... }
             self.initial_response = initial_response 
             
             self.config = get_launcher_config()
@@ -322,11 +353,9 @@ def main():
             try:
                 icon_path = resource_path(os.path.join("launcher_assets", "icons", "formatheus.ico"))
                 self.setWindowIcon(QIcon(icon_path)) 
-            except Exception as e:
-                print(f"Aviso: Ícone de admin não encontrado: {e}")
-                self.setWindowIcon(QIcon()) 
+            except Exception: pass
             
-            self.setFixedSize(400, 350)
+            self.setMinimumSize(450, 400) # <-- Aumentado para notas
             self._build_ui()
             
             if self.ui_mode == "replace_device":
@@ -342,6 +371,7 @@ def main():
                         widget.deleteLater()
             else:
                 layout = QVBoxLayout(self)
+                self.setLayout(layout)
             
             title_label = QLabel("Formatheus")
             font = QFont("Segoe UI", 24)
@@ -356,42 +386,69 @@ def main():
             self.key_input.setPlaceholderText("Cole sua chave de licença (FMT-...)")
             self.key_input.setAlignment(Qt.AlignCenter)
             
+            # --- Widgets de Release (Notas de atualização) ---
+            self.release_notes_label = QLabel("Notas da Versão:")
+            self.release_notes_label.setVisible(False)
+            self.release_notes_area = QPlainTextEdit()
+            self.release_notes_area.setReadOnly(True)
+            self.release_notes_area.setVisible(False)
+            
             self.progress_bar = QProgressBar()
             self.progress_bar.setVisible(False) 
             self.progress_bar.setTextVisible(True)
             self.progress_bar.setFormat("%p% - Baixando...")
 
+            # --- Layout dos Botões (para Pular/Atualizar) ---
+            self.button_layout = QHBoxLayout()
+            
+            self.skip_btn = QPushButton("Pular e Iniciar")
+            self.skip_btn.setProperty("cssClass", "secondary") # (Requer .css)
+            self.skip_btn.clicked.connect(self.launch_anyway)
+            
             self.action_btn = QPushButton("")
             self.action_btn.setMinimumHeight(45)
-            self.action_btn.setProperty("cssClass", "primary") 
+            self.action_btn.setProperty("cssClass", "primary")
+            self.action_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            
+            self.button_layout.addWidget(self.skip_btn)
+            self.button_layout.addWidget(self.action_btn)
+            # --- Fim do Layout de Botões ---
             
             try:
                 self.action_btn.clicked.disconnect()
-            except RuntimeError:
-                pass 
+            except RuntimeError: pass
             self.action_btn.clicked.connect(self.on_action_clicked)
             
-            self.update_ui_for_mode()
+            self.update_ui_for_mode() # Preenche os widgets
 
-            layout.addStretch()
+            # Adiciona os widgets ao layout principal
             layout.addWidget(title_label)
-            layout.addSpacing(20)
+            layout.addSpacing(10)
             layout.addWidget(self.status_label)
             layout.addSpacing(10)
             layout.addWidget(self.key_input)
+            layout.addWidget(self.release_notes_label)
+            layout.addWidget(self.release_notes_area)
             layout.addWidget(self.progress_bar) 
-            layout.addSpacing(20)
-            layout.addWidget(self.action_btn)
-            layout.addStretch()
+            layout.addStretch(1)
+            layout.addLayout(self.button_layout)
+
 
         def update_ui_for_mode(self):
             """Atualiza os widgets visíveis baseado no self.ui_mode"""
+            
+            # Esconde tudo que é condicional
+            self.key_input.setVisible(False)
+            self.progress_bar.setVisible(False)
+            self.release_notes_label.setVisible(False)
+            self.release_notes_area.setVisible(False)
+            self.skip_btn.setVisible(False)
+            self.action_btn.setVisible(True)
+
             if self.ui_mode == "activate":
                 self.status_label.setText("Por favor, ative seu produto para continuar.")
                 self.action_btn.setText("ATIVAR LICENÇA")
                 self.key_input.setVisible(True)
-                self.progress_bar.setVisible(False)
-                self.action_btn.setVisible(True)
             
             elif self.ui_mode == "replace_device":
                 self.status_label.setText("Limite de dispositivos atingido.")
@@ -399,43 +456,69 @@ def main():
                 self.key_input.setText(self.license_key) 
                 self.key_input.setReadOnly(True) 
                 self.key_input.setVisible(True)
-                self.progress_bar.setVisible(False)
-                self.action_btn.setVisible(True)
 
-            elif self.is_first_run or self.ui_mode == "install":
-                self.status_label.setText("Licença OK! O Formatheus precisa ser instalado.")
-                self.action_btn.setText("INSTALAR AGORA")
-                self.key_input.setVisible(False) 
-                self.progress_bar.setVisible(False)
-                self.action_btn.setVisible(True)
+            elif self.ui_mode == "install":
+                v = self.update_info.get("version", "...")
+                self.status_label.setText(f"Bem-vindo! Versão {v} pronta para instalar.")
+                self.action_btn.setText(f"INSTALAR (v{v})")
+                self.show_release_notes()
             
-            elif self.update_info:
-                versao = self.update_info.get("version", "nova")
-                self.status_label.setText(f"Uma nova versão ({versao}) está disponível.")
-                self.action_btn.setText(f"ATUALIZAR AGORA")
-                self.key_input.setVisible(False)
-                self.progress_bar.setVisible(False)
-                self.action_btn.setVisible(True)
+            elif self.ui_mode == "update":
+                v = self.update_info.get("version", "nova")
+                is_mandatory = self.update_info.get("is_mandatory", False)
+                
+                if is_mandatory:
+                    self.status_label.setText(f"Atualização obrigatória (v{v}) disponível.")
+                    self.action_btn.setText(f"ATUALIZAR AGORA (v{v})")
+                    self.skip_btn.setVisible(False) # Não pode pular
+                else:
+                    self.status_label.setText(f"Atualização opcional (v{v}) disponível.")
+                    self.action_btn.setText(f"ATUALIZAR (v{v})")
+                    self.skip_btn.setVisible(True) # Pode pular
+                
+                self.show_release_notes()
             
             elif self.ui_mode == "downloading":
                 self.status_label.setText("Iniciando download...")
-                self.key_input.setVisible(False)
                 self.action_btn.setVisible(False) 
+                self.skip_btn.setVisible(False)
                 self.progress_bar.setVisible(True) 
                 self.progress_bar.setValue(0)
+                self.show_release_notes() # Continua mostrando
 
+        def show_release_notes(self):
+            """Preenche e exibe a caixa de notas de atualização."""
+            if self.update_info:
+                notes = self.update_info.get("release_notes", "Nenhuma nota disponível.")
+                if notes:
+                    self.release_notes_label.setVisible(True)
+                    self.release_notes_area.setPlainText(notes)
+                    self.release_notes_area.setVisible(True)
+
+        @Slot()
+        def launch_anyway(self):
+            """Função do botão 'Pular'."""
+            print("[Launcher] Usuário pulou a atualização opcional.")
+            launch_command = get_app_launch_command()
+            if launch_command:
+                subprocess.Popen(launch_command)
+                self.close()
+            else:
+                QMessageBox.critical(self, "Erro", "Não foi possível encontrar o app para iniciar.")
+                
         @Slot()
         def on_action_clicked(self):
             if self.ui_mode == "activate":
                 self.handle_activation()
             elif self.ui_mode == "replace_device":
                 self.show_replacement_dialog()
-            elif self.is_first_run or self.ui_mode == "install" or self.update_info:
+            elif self.ui_mode == "install" or self.ui_mode == "update":
                 self.handle_install_update()
             else:
                 self.close() 
 
         def handle_activation(self):
+            # ... (Sem alterações) ...
             chave = self.key_input.text().strip().upper()
             if not chave:
                 QMessageBox.warning(self, "Erro", "Por favor, insira uma chave de licença.")
@@ -454,21 +537,23 @@ def main():
             status = response.get("status")
 
             if status == "success":
-                QMessageBox.information(self, "Sucesso", "Licença ativada! O programa será baixado agora.")
-                
-                # --- INÍCIO DA CORREÇÃO ---
-                self.license_key = chave # <-- ADICIONE ESTA LINHA
-                # --- FIM DA CORREÇÃO ---
-                
+                # SUCESSO! Agora, precisamos checar a versão e instalar.
+                self.license_key = chave
                 self.config["license_key"] = chave
                 save_launcher_config(self.config)
                 lease_manager.write_lease(response['real_expiry'], self.device_id)
                 
-                self.is_activated = True
-                self.is_first_run = True 
-                self.ui_mode = "install" 
-                self.update_ui_for_mode() 
-                self.action_btn.setEnabled(True)
+                # Roda a verificação de atualização PÓS-ATIVAÇÃO
+                update_avail, latest_info = check_for_update_firebase("0.0.0")
+                
+                if latest_info:
+                    self.update_info = latest_info
+                    self.ui_mode = "install"
+                    self.update_ui_for_mode()
+                    self.action_btn.setEnabled(True)
+                else:
+                    QMessageBox.critical(self, "Erro Pós-Ativação", "Licença ativada, mas não foi possível obter dados da versão.")
+                    self.close()
 
             elif status == "limit_reached":
                 self.license_key = chave 
@@ -485,6 +570,7 @@ def main():
                 self.action_btn.setText("ATIVAR LICENÇA")
         
         def show_replacement_dialog(self):
+            # ... (Sem alterações) ...
             if not self.initial_response: return
             dialog = DialogoDispositivos(self.initial_response.get("devices", []), self)
             if dialog.exec():
@@ -493,29 +579,30 @@ def main():
                     self.handle_replacement(old_id) 
 
         def handle_replacement(self, old_device_id):
+            # ... (Lógica de handle_replacement - quase sem alterações) ...
             self.action_btn.setEnabled(False)
             self.action_btn.setText("Substituindo...")
             QApplication.processEvents()
 
-            payload = {
-                "license_key": self.license_key, 
-                "old_device_id": old_device_id,
-                "new_device_id": self.device_id,
-                "new_hostname": get_hostname()
-            }
+            payload = { "license_key": self.license_key, "old_device_id": old_device_id,
+                        "new_device_id": self.device_id, "new_hostname": get_hostname() }
             response = firebase_client.call_firebase_function("replace_device", payload)
             
             if response.get("status") == "success":
-                QMessageBox.information(self, "Sucesso", "Dispositivo substituído! O programa será baixado agora.")
                 self.config["license_key"] = self.license_key
                 save_launcher_config(self.config)
                 lease_manager.write_lease(response['real_expiry'], self.device_id)
 
-                self.is_activated = True
-                self.is_first_run = True
-                self.ui_mode = "install"
-                self.update_ui_for_mode() 
-                self.action_btn.setEnabled(True)
+                # Roda a verificação de atualização PÓS-ATIVAÇÃO
+                update_avail, latest_info = check_for_update_firebase("0.0.0")
+                if latest_info:
+                    self.update_info = latest_info
+                    self.ui_mode = "install"
+                    self.update_ui_for_mode()
+                    self.action_btn.setEnabled(True)
+                else:
+                    QMessageBox.critical(self, "Erro Pós-Ativação", "Dispositivo substituído, mas não foi possível obter dados da versão.")
+                    self.close()
             else:
                 QMessageBox.critical(self, "Erro na Substituição", 
                                      f"Não foi possível substituir o dispositivo:\n\n{response.get('message')}")
@@ -523,11 +610,15 @@ def main():
                 self.action_btn.setText("GERENCIAR DISPOSITIVOS")
 
         def handle_install_update(self):
+            # ... (Lógica de handle_install_update - quase sem alterações) ...
             self.action_btn.setEnabled(False)
             
-            version_to_download = "1.0.0" 
-            if self.update_info:
-                version_to_download = self.update_info.get("version", "1.0.0")
+            # A versão para baixar vem do 'update_info' que pegamos do servidor
+            version_to_download = self.update_info.get("version")
+            if not version_to_download:
+                QMessageBox.critical(self, "Erro", "Versão de download não definida.")
+                self.action_btn.setEnabled(True)
+                return
 
             self.status_label.setText("Contatando servidor de download...")
             QApplication.processEvents()
@@ -535,7 +626,7 @@ def main():
             payload = {
                 "license_key": self.license_key,
                 "device_id": self.device_id,
-                "file_version": version_to_download
+                "file_version": version_to_download # <-- USA A VERSÃO DO SERVIDOR
             }
             response = firebase_client.call_firebase_function("get_download_url", payload)
             
@@ -568,6 +659,7 @@ def main():
 
         @Slot(int, int)
         def on_download_progress(self, current, total):
+            # ... (Sem alterações) ...
             if total > 0:
                 percent = (current * 100) / total
                 self.progress_bar.setValue(int(percent))
@@ -575,6 +667,7 @@ def main():
 
         @Slot(bool, str)
         def on_download_finished(self, success, message):
+            # ... (Lógica de on_download_finished - pequena alteração) ...
             self.thread_running = False
             self.download_thread.quit()
             self.download_thread.wait()
@@ -582,10 +675,8 @@ def main():
             if success:
                 self.status_label.setText("Concluído!")
                 
-                version_installed = "1.0.0" 
-                if self.update_info:
-                    version_installed = self.update_info.get("version", "1.0.0")
-                
+                # Salva a versão que acabamos de instalar
+                version_installed = self.update_info.get("version", "0.0.0")
                 self.config["app_version"] = version_installed
                 save_launcher_config(self.config)
                 
@@ -594,14 +685,17 @@ def main():
                 QMessageBox.critical(self, "Erro na Instalação", 
                                      f"A instalação falhou:\n\n{message}")
                 
-                self.ui_mode = "install" if self.is_first_run else "update"
+                # Volta para o modo anterior (instalar ou atualizar)
+                self.ui_mode = "install" if self.config.get("app_version", "0.0.0") == "0.0.0" else "update"
                 self.update_ui_for_mode()
                 self.action_btn.setEnabled(True)
 
         def closeEvent(self, event):
             if hasattr(self, 'thread_running') and self.thread_running:
-                print("[Launcher] Aviso: Tentando fechar durante o download.")
-            event.accept()
+                QMessageBox.warning(self, "Download em Progresso", "Por favor, aguarde o fim do download.")
+                event.ignore() # Impede o fechamento
+            else:
+                event.accept()
             
     # --- FIM DA CLASSE DA JANELA ---
 
@@ -609,11 +703,8 @@ def main():
     # 5. Inicia o aplicativo
     app = QApplication(sys.argv)
     
-    # --- INÍCIO DA CORREÇÃO DO STYLESHEET ---
-    
-    # Tenta ler o tema do usuário, mas APENAS se o app já existir
     initial_theme = "light" 
-    if ui_mode != "activate" and ui_mode != "replace_device" and not is_first_run: 
+    if ui_mode != "activate" and ui_mode != "replace_device": 
         try:
             sys.path.insert(0, APP_DIR)
             import gerenciador_config
@@ -623,14 +714,10 @@ def main():
         except Exception as e:
             print(f"[Launcher] Não foi possível ler config do app: {e}. Usando tema padrão.")
 
-    # Aplica o tema
     if HAS_THEME_LIB:
         try:
             qss = qdarktheme.load_stylesheet(initial_theme)
-            
-            # Tenta carregar o stylesheet do LAUNCHER, não do APP
             try:
-                # (Presume que 'stylesheet_launcher.py' existe)
                 import stylesheet_launcher 
                 qss += stylesheet_launcher.get_style_sheet()
             except ImportError:
@@ -640,37 +727,47 @@ def main():
             app.setStyleSheet(qss)
         except Exception as e:
             print(f"Não foi possível carregar o tema do launcher: {e}")
-    # --- FIM DA CORREÇÃO DO STYLESHEET ---
 
-    app_version = launcher_config.get("app_version", "0.0.0")
-    is_first_run_real = (app_version == "0.0.0")
-    
-    if ui_mode == "install":
-        is_first_run_real = True
-    
+    # Pega o 'is_mandatory' final para a lógica de 'launch'
+    is_mandatory_update = update_info and update_info.get("is_mandatory", False)
+
     window = LauncherWindow(
         is_dark_theme=(initial_theme == "dark"),
         ui_mode=ui_mode,
         update_info=update_info,
-        is_first_run=is_first_run_real,
         initial_response=initial_response 
     )
     window.show()
     
     app_exit_code = app.exec() 
     
+    # --- LÓGICA FINAL MODIFICADA ---
     final_config = get_launcher_config()
     final_license_key = final_config.get("license_key")
     final_app_version = final_config.get("app_version") 
 
+    # Se a janela foi fechada (não está visível) E a licença está ok
+    # E (NÃO era uma atualização obrigatória OU o usuário pulou (ui_mode != 'update'))
     if (not window.isVisible()) and final_license_key and final_app_version:
-        if not is_mandatory_update or update_info is None:
+        
+        # Inicia o app se:
+        # 1. O app foi fechado após uma instalação/download (app_exit_code == 0 e ui_mode era 'downloading')
+        # 2. O usuário pulou uma atualização opcional (app_exit_code == 0 e ui_mode era 'update' e not is_mandatory)
+        
+        # Simplificando: Se a janela não está visível e não era uma atualização obrigatória, tente iniciar.
+        if not is_mandatory_update:
             print("[Launcher] Iniciando main_app após ação do launcher...")
             launch_command = get_app_launch_command()
             if launch_command:
                 subprocess.Popen(launch_command)
             else:
-                QMessageBox.critical(None, "Erro Pós-Instalação", "O aplicativo foi instalado, mas não foi encontrado.")
+                # Se o app_exit_code != 0, significa que a UI foi fechada antes do download
+                if app_exit_code != 0:
+                     print("[Launcher] Ação cancelada pelo usuário.")
+                else:
+                    QMessageBox.critical(None, "Erro Pós-Instalação", "O aplicativo foi instalado, mas não foi encontrado.")
+        else:
+             print("[Launcher] Atualização obrigatória não foi concluída. App não será iniciado.")
                 
     sys.exit(app_exit_code)
 
