@@ -12,6 +12,16 @@ from datetime import datetime
 import uuid 
 import platform 
 
+#Imports para a checagem de segurança HMAC
+import hmac 
+import hashlib
+from datetime import datetime, timezone
+
+# --- VARIÁVEIS DE SEGURANÇA ---
+# IMPORTANTE: Deve ser IDÊNTICO ao que está no main_app.py
+DYNAMIC_SECRET_SALT = b"OWIYVQUXJ64IJETQPXT1UZZ16YBNI8" 
+# ------------------------------
+
 # --- NOVA IMPORTAÇÃO ---
 try:
     from packaging import version
@@ -235,40 +245,72 @@ def main():
     
     # --- FASE 3: Verificação de Atualização (Apenas se ativado) ---
     
-    update_info = None # Informações da (versão, notas, etc.)
+    update_info = None 
     
     if ui_mode == "check_update":
         app_version = launcher_config.get("app_version", "0.0.0")
-        is_first_run = (app_version == "0.0.0")
         
         update_available, latest_info = check_for_update_firebase(app_version)
         
-        if not latest_info:
-            # Falhou em contatar o servidor de update
-            ui_mode = "show_error"
-            error_message = "Não foi possível contatar o servidor de atualização.\nVerifique sua internet e tente novamente."
+        # --- PREPARAÇÃO DO TOKEN DE SEGURANÇA (CENTRALIZADO) ---
+        # Gera o token uma vez para ser usado em qualquer um dos cenários abaixo
+        now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+        timestamp_str = now_utc.isoformat()
+        token = hmac.new(DYNAMIC_SECRET_SALT, timestamp_str.encode('utf-8'), hashlib.sha256).hexdigest()
         
+        # CRIA UM DICIONÁRIO DE AMBIENTE LIMPO
+        env_dict = os.environ.copy()
+        env_dict["FORMATHEUS_TOKEN"] = token
+        env_dict["FORMATHEUS_TIMESTAMP"] = timestamp_str
+        # -------------------------------------------------------
+        
+        # Fallback para o caso de falha de conexão com o servidor de update
+        if not latest_info:
+            launch_command = get_app_launch_command()
+            if launch_command:
+                print("[Launcher] Falha ao checar servidor. Iniciando versão local...")
+                subprocess.Popen(launch_command, env=env_dict) # <-- USA env_dict
+                sys.exit(0)
+            else:
+                ui_mode = "show_error"
+                error_message = "Não foi possível contatar o servidor de atualização e o app não está instalado localmente."
+            
         else:
             # Servidor respondeu!
-            update_info = latest_info # Salva as infos da versão (ex: 1.0.1)
+            update_info = latest_info
             
             launch_command = get_app_launch_command()
+            app_exists_locally = launch_command is not None
             
-            if is_first_run or not launch_command:
-                # Se é a primeira vez ou o app foi deletado, força instalação
-                print("[Launcher] Primeira execução ou app não encontrado. Forçando instalação.")
+            # 1. App não existe localmente (força download/instalação)
+            if not app_exists_locally:
+                print("[Launcher] App não encontrado. Forçando instalação/download.")
                 ui_mode = "install"
-            
-            elif update_available:
-                # Temos uma atualização!
+                
+            # 2. App existe E há uma atualização disponível
+            elif app_exists_locally and version.parse(app_version) < version.parse(update_info.get("version", "0.0.0")):
                 print(f"[Launcher] Atualização encontrada: {app_version} -> {update_info.get('version')}")
                 ui_mode = "update"
             
+            # 3. Cenário do Usuário (Instalador Full): App existe, mas a versão não foi registrada ("0.0.0")
+            elif app_exists_locally and app_version == "0.0.0":
+                # Assumimos que a binária instalada é a última versão do servidor.
+                app_version_simulated = update_info.get("version", "1.0.0")
+                launcher_config["app_version"] = app_version_simulated
+                save_launcher_config(launcher_config)
+
+                print(f"[Launcher] Pacote de instalação detectado. Registrando versão {app_version_simulated} e iniciando.")
+                subprocess.Popen(launch_command, env=env_dict) # <-- USA env_dict
+                sys.exit(0)
+                
+            # 4. App existe, versão está OK. Lança.
             else:
-                # Licença OK, App existe, Sem atualização.
-                print("[Launcher] Licença OK. Nenhuma atualização. Iniciando main_app...")
-                subprocess.Popen(launch_command)
-                sys.exit(0) 
+                print("[Launcher] Licença OK. App atualizado. Iniciando main_app...")
+                subprocess.Popen(launch_command, env=env_dict) # <-- USA env_dict
+                sys.exit(0)
+                
+        # Se o fluxo não foi interrompido com sys.exit(0), define update_info para a UI
+        update_info = latest_info
 
     # ---
     # --- ⬆️⬆️ FIM DA FASE 3 MODIFICADA ⬆️⬆️
@@ -498,13 +540,11 @@ def main():
         @Slot()
         def launch_anyway(self):
             """Função do botão 'Pular'."""
-            print("[Launcher] Usuário pulou a atualização opcional.")
-            launch_command = get_app_launch_command()
-            if launch_command:
-                subprocess.Popen(launch_command)
-                self.close()
-            else:
-                QMessageBox.critical(self, "Erro", "Não foi possível encontrar o app para iniciar.")
+            print("[Launcher] Usuário optou por pular a atualização.")
+            # NÃO iniciamos o subprocesso aqui. 
+            # Apenas fechamos a janela. O bloco 'if' no final do script
+            # detectará que a janela fechou e iniciará o app com o Token seguro.
+            self.close()
                 
         @Slot()
         def on_action_clicked(self):
@@ -748,20 +788,29 @@ def main():
 
     # Se a janela foi fechada (não está visível) E a licença está ok
     # E (NÃO era uma atualização obrigatória OU o usuário pulou (ui_mode != 'update'))
+    # Se a janela foi fechada (não está visível) E a licença está ok
+    # Se a janela foi fechada (não está visível) E a licença está ok
     if (not window.isVisible()) and final_license_key and final_app_version:
         
-        # Inicia o app se:
-        # 1. O app foi fechado após uma instalação/download (app_exit_code == 0 e ui_mode era 'downloading')
-        # 2. O usuário pulou uma atualização opcional (app_exit_code == 0 e ui_mode era 'update' e not is_mandatory)
-        
-        # Simplificando: Se a janela não está visível e não era uma atualização obrigatória, tente iniciar.
+        # Inicia o app se NÃO era uma atualização obrigatória pendente
         if not is_mandatory_update:
             print("[Launcher] Iniciando main_app após ação do launcher...")
+            
+            # 1. Gera Token
+            now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+            timestamp_str = now_utc.isoformat()
+            token = hmac.new(DYNAMIC_SECRET_SALT, timestamp_str.encode('utf-8'), hashlib.sha256).hexdigest()
+            
+            # 2. Cria Dicionário de Ambiente
+            env_dict = os.environ.copy()
+            env_dict["FORMATHEUS_TOKEN"] = token
+            env_dict["FORMATHEUS_TIMESTAMP"] = timestamp_str
+
             launch_command = get_app_launch_command()
             if launch_command:
-                subprocess.Popen(launch_command)
+                # 3. Usa env_dict
+                subprocess.Popen(launch_command, env=env_dict)
             else:
-                # Se o app_exit_code != 0, significa que a UI foi fechada antes do download
                 if app_exit_code != 0:
                      print("[Launcher] Ação cancelada pelo usuário.")
                 else:

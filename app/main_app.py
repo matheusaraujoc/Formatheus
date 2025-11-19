@@ -23,9 +23,11 @@ import re
 os.environ['QTWEBENGINE_REMOTE_DEBUGGING'] = '9222'
 
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import copy # <-- NOVO: Para deepcopy (segurança da thread)
-
+import copy # <-- NOVO: Para deepcopy (segurança da thread)
+import hmac # <-- NOVO
+import hashlib # <-- NOVO
 from PySide6 import QtWidgets, QtCore, QtGui 
 # --- INÍCIO: Novas importações para Threading ---
 from PySide6.QtCore import QObject, QThread, Signal, Slot
@@ -37,27 +39,6 @@ from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEd
 from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QIcon 
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
-
-#IDENTIFICA SE ESTÁ RODANDO NO PYINSTALLER
-def resource_path(relative_path):
-    """ Retorna o caminho absoluto para o recurso, funcionando em dev e no PyInstaller """
-    try:
-        # PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        # Se não estiver compilado, usa o caminho normal do script
-        base_path = os.path.abspath(os.path.dirname(__file__))
-
-    return os.path.join(base_path, relative_path)
-
-
-# --- Tenta importar o tema ---
-try:
-    import qdarktheme
-    HAS_THEME_LIB = True
-except ImportError:
-    HAS_THEME_LIB = False
-# ------------------------
 
 # --- IMPORTS DE ESTILO ---
 import stylesheet 
@@ -82,6 +63,103 @@ import gerenciador_recuperacao
 from dialogs import DialogoRecuperacao
 # -------------------------------------------------------------------------------
 
+# ----------------------------------------------------
+# --- VARIÁVEIS DE SEGURANÇA E CONTROLE ---
+# ----------------------------------------------------
+
+# 1. CONTROLE DE DEBUG: True = Pula a verificação do Launcher
+DISABLE_LAUNCHER_CHECK = False # <-- Mantenha True para DEBUG, use False para PRODUÇÃO
+
+# 2. SEGREDO COMPARTILHADO: Deve ser idêntico ao do launcher
+DYNAMIC_SECRET_SALT = b"OWIYVQUXJ64IJETQPXT1UZZ16YBNI8" 
+
+# 3. TOLERÂNCIA: Tempo máximo de validade do Token (em minutos)
+TOKEN_EXPIRY_MINUTES = 5
+# ----------------------------------------------------
+
+
+# --- FUNÇÃO DE CHECAGEM DE SEGURANÇA (NOVA) ---
+def run_hmac_security_check():
+    """Executa a verificação de segurança HMAC antes de iniciar qualquer UI."""
+    
+    # --- DEBUG TEMPORÁRIO (Apague depois) ---
+    token_recebido = os.environ.get("FORMATHEUS_TOKEN")
+    time_recebido = os.environ.get("FORMATHEUS_TIMESTAMP")
+    print(f"\n[MAIN_APP DEBUG] Token Recebido: {token_recebido}")
+    print(f"[MAIN_APP DEBUG] Time Recebido: {time_recebido}")
+    print("-" * 30)
+    # ----------------------------------------
+    """Executa a verificação de segurança HMAC antes de iniciar qualquer UI."""
+    if DISABLE_LAUNCHER_CHECK:
+        print("Aviso: Verificação de Launcher desabilitada (Modo DEBUG).")
+        return # Permite a execução
+    
+    received_token = os.environ.get("FORMATHEUS_TOKEN")
+    received_timestamp_str = os.environ.get("FORMATHEUS_TIMESTAMP")
+    
+    if not received_token or not received_timestamp_str:
+        QMessageBox.critical(None, "Erro de Inicialização", 
+                             "O programa deve ser iniciado através do Launcher.")
+        sys.exit(1)
+    
+    try:
+        received_dt = datetime.fromisoformat(received_timestamp_str)
+        now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+        
+        # 1. Checagem de Expiração
+        if now_utc - received_dt > timedelta(minutes=TOKEN_EXPIRY_MINUTES):
+            QMessageBox.critical(None, "Erro de Inicialização", 
+                                 "O token de segurança expirou. Por favor, reinicie pelo Launcher.")
+            sys.exit(1)
+        
+        # 2. Gera o token esperado
+        expected_token = hmac.new(
+            DYNAMIC_SECRET_SALT,
+            received_timestamp_str.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        # 3. Checagem de Validade (comparação segura)
+        if not hmac.compare_digest(received_token, expected_token):
+            QMessageBox.critical(None, "Erro de Inicialização", 
+                                 "Chave de segurança inválida. O programa foi adulterado.")
+            sys.exit(1)
+        
+        # Se passou em tudo, remove as variáveis de ambiente por segurança
+        del os.environ["FORMATHEUS_TOKEN"]
+        del os.environ["FORMATHEUS_TIMESTAMP"]
+        
+    except ValueError:
+        QMessageBox.critical(None, "Erro de Inicialização", 
+                             "Formato de Timestamp inválido.")
+        sys.exit(1)
+    except Exception as e:
+        QMessageBox.critical(None, "Erro de Inicialização", 
+                             f"Erro interno de segurança: {e}")
+        sys.exit(1)
+# --- FIM DA FUNÇÃO DE CHECAGEM ---
+
+
+#IDENTIFICA SE ESTÁ RODANDO NO PYINSTALLER
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para o recurso, funcionando em dev e no PyInstaller """
+    try:
+        # PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Se não estiver compilado, usa o caminho normal do script
+        base_path = os.path.abspath(os.path.dirname(__file__))
+
+    return os.path.join(base_path, relative_path)
+
+
+# --- Tenta importar o tema ---
+try:
+    import qdarktheme
+    HAS_THEME_LIB = True
+except ImportError:
+    HAS_THEME_LIB = False
+# ------------------------
 
 # --- INÍCIO: Worker de Preview (Anti-travamento) ---
 class PreviewWorker(QObject):
@@ -1165,6 +1243,12 @@ if __name__ == '__main__':
         sys.exit(1)
 
     app = QApplication(sys.argv)
+
+    # ----------------------------------------------------
+    # --- EXECUÇÃO DA CHECAGEM DE SEGURANÇA (AQUI É ONDE CRASHA) ---
+    # ----------------------------------------------------
+    run_hmac_security_check()
+    # ----------------------------------------------------
     
     config = gerenciador_config.carregar_config()
     initial_theme = config.get('ui_settings', {}).get('theme', 'light') # Padrão 'light'
