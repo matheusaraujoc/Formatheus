@@ -35,7 +35,7 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QTextEdit,
                              QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog,
                              QMessageBox, QTabWidget, QComboBox,
-                             QFormLayout, QMenuBar, QCheckBox, QSplitter, QStyle)
+                             QFormLayout, QMenuBar, QCheckBox, QSplitter, QStyle, QProgressDialog)
 from PySide6.QtGui import QAction, QKeySequence, QActionGroup, QIcon 
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -44,6 +44,7 @@ from PySide6.QtCore import QMarginsF
 from dialogo_exportacao import DialogoExportacao
 import subprocess # Para abrir o arquivo no final
 import platform   # Para detectar o SO
+from PySide6.QtCore import Qt
 
 # --- IMPORTS DE ESTILO ---
 import stylesheet 
@@ -1248,49 +1249,29 @@ class ABNTHelperApp(QWidget):
         self.saved_zoom = self.preview_display.zoomFactor()
         self.preview_display.setZoomFactor(1.0)
 
-        # 2. Prepara CSS Condicional baseado nas opções
+        # 2. Prepara CSS Condicional
         css_ocultacao = ""
         if not opcoes["incluir_pre_textual"]:
-            # Oculta Capa, Folha de Rosto e Resumo
             css_ocultacao += ".pre-textual { display: none !important; } "
-        
         if not opcoes["incluir_sumario"]:
-            # Oculta especificamente a página do sumário (se ela não tiver classe 'pre-textual' ou se quiser controle fino)
-            # No seu gerador_preview, o sumário tem a classe 'sumario-page'
             css_ocultacao += ".sumario-page { display: none !important; } "
 
-        if not opcoes["incluir_referencias"]:
-            # Oculta a seção de referências. Precisamos garantir que o HTML tenha um ID ou classe para isso.
-            # No gerador_preview atual, referências começam com <h1 id='secao-referencias'>.
-            # Selecionar intervalos no CSS é difícil. 
-            # TRUQUE: Vamos esconder o H1 e os paragrafos seguintes que sejam .referencia
-            # Mas o ideal seria envolver as referências numa DIV no gerador_preview.
-            # Como não queremos mexer lá agora, vamos assumir que o usuário raramente tira as referências no PDF.
-            pass 
-
-        # 3. Injeta o CSS de Impressão (O mesmo de antes, mais as regras de ocultação)
+        # 3. Injeta CSS
         js_print_settings = """
         (function() {
             var style = document.createElement('style');
             style.innerHTML = `
                 @media print {
-                    /* --- REGRAS DE OCULTAÇÃO (OPÇÕES DO USUÁRIO) --- */
                     %s
-
-                    /* --- GERAL --- */
                     @page { margin: 0; size: A4 portrait; }
                     html, body { width: 210mm !important; height: auto !important; margin: 0 !important; padding: 0 !important; background: white !important; -webkit-print-color-adjust: exact; }
                     body > div, #app, .container { display: block !important; margin: 0 !important; padding: 0 !important; }
-
-                    /* --- PÁGINAS --- */
                     .pagina {
                         box-sizing: border-box !important; width: 210mm !important; min-height: 296.8mm !important;
                         padding: 3cm 2cm 2cm 3cm !important; margin: 0 !important; border: none !important; box-shadow: none !important;
                         page-break-after: always !important; break-inside: avoid !important; position: relative !important; overflow: hidden !important;
                     }
                     .pagina:last-child { page-break-after: auto !important; margin-bottom: 0 !important; }
-                    
-                    /* --- CAPA/CONTRACAPA --- */
                     .pagina.capa, .pagina.folha-rosto { display: block !important; }
                     .pagina.capa > div:last-child, .pagina.folha-rosto > div:last-child {
                         position: absolute !important; bottom: 2cm !important; left: 0 !important; width: 100%% !important; text-align: center !important; margin: 0 !important; padding: 0 !important;
@@ -1302,12 +1283,13 @@ class ABNTHelperApp(QWidget):
             document.head.appendChild(style);
             document.querySelectorAll('a[href^="#"]').forEach(function(link) { link.removeAttribute('target'); });
         })();
-        """ % (css_ocultacao) # Injeta a string de ocultação no %s
+        """ % (css_ocultacao)
 
         self.preview_display.page().runJavaScript(js_print_settings)
 
         layout = QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Portrait, QMarginsF(0, 0, 0, 0))
 
+        # Conecta callback
         try:
             self.preview_display.page().pdfPrintingFinished.disconnect(self._on_pdf_finished)
         except Exception: pass
@@ -1335,7 +1317,10 @@ class ABNTHelperApp(QWidget):
             del self._opcoes_exportacao_pendente
 
 
-    #NOVA LOGICA DE EXPORTAÇÃO
+    # -----------------------------------------------------------------
+    # LÓGICA DE EXPORTAÇÃO (ATUALIZADA COM PROGRESS BAR E CORREÇÃO PDF)
+    # -----------------------------------------------------------------
+
     @QtCore.Slot()
     def _abrir_dialogo_exportacao(self):
         # Sincroniza antes de exportar
@@ -1368,30 +1353,46 @@ class ABNTHelperApp(QWidget):
             if not caminho_final:
                 return
 
-            # Executa a exportação baseada na escolha
-            sucesso = False
-            if formato == "docx":
-                sucesso = self._executar_exportacao_docx(caminho_final, opcoes)
-            else:
-                self._executar_exportacao_pdf(caminho_final, opcoes)
-                # O PDF é assíncrono, o sucesso é tratado no callback, 
-                # mas passamos a opção 'abrir_arquivo' para ele.
-                self._opcoes_exportacao_pendente = opcoes # Guarda opções para o callback
-                return 
+            # --- FEEDBACK VISUAL (LOADING) ---
+            # Cria um diálogo de progresso indeterminado (0, 0) para mostrar que está trabalhando
+            self.progress_dialog = QProgressDialog("Exportando documento, aguarde...", None, 0, 0, self)
+            self.progress_dialog.setWindowTitle("Processando")
+            self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal) # Bloqueia a janela principal
+            self.progress_dialog.setCancelButton(None) # Remove botão cancelar
+            self.progress_dialog.setMinimumDuration(0) # Mostra imediatamente
+            self.progress_dialog.show()
+            QApplication.processEvents() # Força a renderização da janela de loading
 
-            # Lógica pós-exportação (Apenas DOCX aqui, PDF é no callback)
-            if sucesso:
-                if opcoes["abrir_arquivo"]:
+            # Executa a exportação
+            if formato == "docx":
+                # DOCX é síncrono
+                sucesso = self._executar_exportacao_docx(caminho_final, opcoes)
+                
+                # Fecha o loading pois acabou
+                self.progress_dialog.close() 
+                self.progress_dialog = None
+                
+                if sucesso and opcoes["abrir_arquivo"]:
                     self._abrir_arquivo_sistema(caminho_final)
+            
+            else:
+                # PDF é assíncrono. 
+                # Armazena as opções para usar no callback FINAL (_on_pdf_finished)
+                self._pdf_opcoes_pendentes = opcoes 
+                
+                # NÃO fechamos o progress_dialog aqui. Ele será fechado no callback.
+                self._executar_exportacao_pdf(caminho_final, opcoes)
 
     def _executar_exportacao_docx(self, caminho, opcoes):
         try:
             gerador = GeradorDOCX(self.documento)
-            # Passamos as opções para o gerador
             gerador.gerar_documento(caminho, opcoes)
-            QMessageBox.information(self, "Sucesso", f"Documento DOCX gerado em:\n{caminho}")
+            # A mensagem de sucesso agora aparece APÓS fechar o loading no método acima, 
+            # ou podemos mostrar aqui, mas idealmente o loading deve sumir antes.
             return True
         except Exception as e:
+            if hasattr(self, 'progress_dialog') and self.progress_dialog:
+                self.progress_dialog.close()
             QMessageBox.critical(self, "Erro na Exportação", f"Ocorreu um erro:\n{e}")
             return False
 
@@ -1409,21 +1410,28 @@ class ABNTHelperApp(QWidget):
     
     @QtCore.Slot(str, bool)
     def _on_pdf_finished(self, caminho_arquivo, sucesso):
-        """Callback chamado quando o PDF termina."""
-        # 1. Restaura o zoom para o usuário não achar estranho
+        # 1. Fecha o LOADING (Isso resolve o pedido visual)
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+
+        # 2. Restaura zoom
         if hasattr(self, 'saved_zoom'):
             self.preview_display.setZoomFactor(self.saved_zoom)
 
-        # Desconecta sinal
-        try:
-            self.preview_display.page().pdfPrintingFinished.disconnect(self._on_pdf_finished)
-        except Exception:
-            pass
-
         if sucesso:
             QMessageBox.information(self, "Sucesso", f"PDF gerado com sucesso em:\n{caminho_arquivo}")
+            
+            # 3. Verifica se deve abrir (Correção do bug de abrir)
+            if hasattr(self, '_pdf_opcoes_pendentes'):
+                if self._pdf_opcoes_pendentes.get("abrir_arquivo"):
+                    print(f"Abrindo PDF automaticamente: {caminho_arquivo}")
+                    self._abrir_arquivo_sistema(caminho_arquivo)
+                
+                # Limpa a variável
+                del self._pdf_opcoes_pendentes
         else:
-            QMessageBox.critical(self, "Erro", "Falha ao gerar o arquivo PDF.")
+            QMessageBox.critical(self, "Erro", "Falha ao gerar o arquivo PDF.\nVerifique se ele está aberto em outro programa.")
 
 
 if __name__ == '__main__':
