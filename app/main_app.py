@@ -341,6 +341,25 @@ class ABNTHelperApp(QWidget):
         self.btn_fechar_busca.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
         self.btn_atualizar_preview.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"restore{suffix}.png")))
 
+        # --- NOVO: Atualização de Cor do Texto da Busca ---
+        if hasattr(self, 'lbl_contagem_busca'):
+            texto_atual = self.lbl_contagem_busca.text()
+            
+            # Caso 1: Nenhum resultado encontrado (0/0) -> Vermelho adaptado
+            if texto_atual == "0/0":
+                cor = "#ff6b6b" if is_dark else "red"
+                self.lbl_contagem_busca.setStyleSheet(f"color: {cor}; font-weight: bold;")
+            
+            # Caso 2: Resultados encontrados (X/Y) -> Branco ou Preto
+            elif texto_atual:
+                cor = "white" if is_dark else "#333"
+                self.lbl_contagem_busca.setStyleSheet(f"color: {cor}; font-weight: bold;")
+            
+            # Caso 3: Vazio (Estado inicial) -> Branco ou Cinza
+            else:
+                cor = "white" if is_dark else "#666"
+                self.lbl_contagem_busca.setStyleSheet(f"color: {cor}; font-size: 11px;")
+
         # --- NOVO: Paginação ---
         if hasattr(self, 'btn_pag_anterior'):
             self.btn_pag_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-left{suffix}.png")))
@@ -713,27 +732,35 @@ class ABNTHelperApp(QWidget):
         self.busca_input = QLineEdit()
         self.busca_input.setPlaceholderText("Buscar na pré-visualização...")
         
-        # --- ALTERAÇÃO AQUI: Botões agora sem texto, estilo "Clean" ---
+        # --- ALTERAÇÃO: Busca instantânea ao digitar ---
+        self.busca_input.textChanged.connect(self._on_texto_busca_alterado)
+        # -----------------------------------------------
+
+        self.lbl_contagem_busca = QLabel("")
+        self.lbl_contagem_busca.setFixedWidth(60)
+        self.lbl_contagem_busca.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Botão Anterior
-        self.btn_buscar_anterior = QPushButton() # Texto removido
+        # --- ALTERAÇÃO AQUI: Cor dinâmica inicial ---
+        cor_inicial = "white" if self.is_dark_theme else "#666"
+        self.lbl_contagem_busca.setStyleSheet(f"color: {cor_inicial}; font-size: 11px;")
+        # --------------------------------------------
+        
+        # Botões de Busca (Clean)
+        self.btn_buscar_anterior = QPushButton()
         self.btn_buscar_anterior.setToolTip("Buscar Anterior")
         self.btn_buscar_anterior.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_buscar_anterior.setStyleSheet("border: none; background: transparent;") 
         self.btn_buscar_anterior.setIconSize(QtCore.QSize(24, 24))
 
-        # Botão Próximo
-        self.btn_buscar_proximo = QPushButton() # Texto removido
+        self.btn_buscar_proximo = QPushButton()
         self.btn_buscar_proximo.setToolTip("Buscar Próximo")
         self.btn_buscar_proximo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_buscar_proximo.setStyleSheet("border: none; background: transparent;")
         self.btn_buscar_proximo.setIconSize(QtCore.QSize(24, 24))
         
-        # Checkbox
         self.busca_case_sensitive = QCheckBox("Diferenciar M/m")
         
-        # Botão Fechar
-        self.btn_fechar_busca = QPushButton() # Texto removido
+        self.btn_fechar_busca = QPushButton()
         self.btn_fechar_busca.setToolTip("Fechar Barra de Busca")
         self.btn_fechar_busca.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_fechar_busca.setStyleSheet("border: none; background: transparent;")
@@ -741,6 +768,7 @@ class ABNTHelperApp(QWidget):
 
         busca_layout.addWidget(QLabel("Localizar:"))
         busca_layout.addWidget(self.busca_input)
+        busca_layout.addWidget(self.lbl_contagem_busca)
         busca_layout.addWidget(self.btn_buscar_anterior)
         busca_layout.addWidget(self.btn_buscar_proximo)
         busca_layout.addWidget(self.busca_case_sensitive)
@@ -750,21 +778,20 @@ class ABNTHelperApp(QWidget):
         layout.addWidget(self.busca_toolbar)
         self.busca_toolbar.setVisible(self.is_search_bar_visible)
         
-        # --- 2. ÁREA DE VISUALIZAÇÃO (Meio - Expande) ---
+        # --- 2. ÁREA DE VISUALIZAÇÃO ---
         self.preview_display = QWebEngineView()
         self.preview_display.setHtml("<html><body><h1>Pré-Visualização</h1><p>A pré-visualização será atualizada aqui.</p></body></html>")
         self.preview_display.setZoomFactor(self.BASE_ZOOM_FACTOR)
         
         layout.addWidget(self.preview_display, 1) 
 
-        # --- 3. BARRA DE PAGINAÇÃO (Fundo) ---
+        # --- 3. BARRA DE PAGINAÇÃO ---
         self.paginacao_toolbar = QWidget()
         self.paginacao_toolbar.setStyleSheet("border-top: 1px solid #CCCCCC;") 
         
         pag_layout = QHBoxLayout(self.paginacao_toolbar)
         pag_layout.setContentsMargins(5, 2, 5, 2)
         
-        # Container centralizado para os botões de navegação
         container_nav = QWidget()
         layout_nav = QHBoxLayout(container_nav)
         layout_nav.setContentsMargins(0,0,0,0)
@@ -796,22 +823,24 @@ class ABNTHelperApp(QWidget):
         layout_nav.addWidget(self.lbl_total_paginas)
         layout_nav.addWidget(self.btn_pag_proximo)
 
-        # Botão Fechar Paginação
         self.btn_fechar_paginacao = QPushButton()
         self.btn_fechar_paginacao.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_fechar_paginacao.setToolTip("Ocultar Barra de Paginação")
         self.btn_fechar_paginacao.setStyleSheet("border: none; background: transparent;")
         self.btn_fechar_paginacao.setIconSize(QtCore.QSize(24, 24))
         
-        # Montagem do Layout da Barra Inferior
         pag_layout.addStretch() 
         pag_layout.addWidget(container_nav) 
         pag_layout.addStretch() 
         pag_layout.addWidget(self.btn_fechar_paginacao) 
         
-        # Define ícones iniciais
+        # Ícones iniciais
         suffix = "-white" if self.is_dark_theme else ""
         try:
+            self.btn_buscar_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"previous{suffix}.png")))
+            self.btn_buscar_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"next{suffix}.png")))
+            self.btn_fechar_busca.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
+            
             self.btn_pag_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-left{suffix}.png")))
             self.btn_pag_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-right{suffix}.png")))
             self.btn_fechar_paginacao.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
@@ -831,7 +860,8 @@ class ABNTHelperApp(QWidget):
         self.btn_buscar_anterior.clicked.connect(self._buscar_anterior_preview)
         self.busca_input.returnPressed.connect(self._buscar_proximo_preview)
         self.btn_fechar_busca.clicked.connect(self._alternar_barra_busca)
-
+        
+        self.preview_display.page().findTextFinished.connect(self._on_resultado_busca_recebido)
         self.preview_display.loadFinished.connect(self._restaurar_scroll_preview)
         self.preview_display.loadFinished.connect(self._injetar_js_paginacao)
         self.preview_display.titleChanged.connect(self._on_titulo_web_changed)
@@ -839,7 +869,6 @@ class ABNTHelperApp(QWidget):
         self.btn_pag_anterior.clicked.connect(self._ir_para_pagina_anterior)
         self.btn_pag_proximo.clicked.connect(self._ir_para_proxima_pagina)
         self.spin_pagina.valueChanged.connect(self._ir_para_pagina_especifica)
-        
         self.btn_fechar_paginacao.clicked.connect(self._alternar_barra_paginacao)
         
         return widget
@@ -1691,6 +1720,50 @@ class ABNTHelperApp(QWidget):
         self.is_pagination_bar_visible = new_visibility
         self.config['ui_settings']['pagination_bar_visible'] = new_visibility
         gerenciador_config.salvar_config(self.config)
+
+    @QtCore.Slot(str)
+    def _limpar_contador_busca_se_vazio(self, text):
+        """Limpa o contador se o usuário apagar o texto."""
+        if not text:
+            self.lbl_contagem_busca.setText("")
+            self.preview_display.findText("") # Limpa os destaques no HTML
+
+    @QtCore.Slot(object) 
+    def _on_resultado_busca_recebido(self, result):
+        """
+        Atualiza o label com a contagem (ex: 1/5) respeitando o tema atual.
+        """
+        total = result.numberOfMatches()
+        
+        if total == 0:
+            if self.busca_input.text():
+                # Cor de erro (Vermelho claro no tema escuro para leitura, Vermelho puro no claro)
+                cor_erro = "#ff6b6b" if self.is_dark_theme else "red"
+                self.lbl_contagem_busca.setText("0/0")
+                self.lbl_contagem_busca.setStyleSheet(f"color: {cor_erro}; font-weight: bold;")
+            else:
+                self.lbl_contagem_busca.setText("")
+        else:
+            atual = result.activeMatch()
+            # Cor de sucesso (Branco no tema escuro, Preto suave no claro)
+            cor_sucesso = "white" if self.is_dark_theme else "#333"
+            self.lbl_contagem_busca.setText(f"{atual}/{total}")
+            self.lbl_contagem_busca.setStyleSheet(f"color: {cor_sucesso}; font-weight: bold;")
+
+    @QtCore.Slot(str)
+    def _on_texto_busca_alterado(self, text):
+        """
+        Chamado a cada caractere digitado.
+        Se houver texto, busca imediatamente.
+        Se estiver vazio, limpa os resultados.
+        """
+        if not text:
+            self.lbl_contagem_busca.setText("")
+            self.preview_display.findText("") # Limpa os destaques
+        else:
+            # Dispara a busca usando a lógica existente.
+            # O QWebEngine entende que se o texto mudou, é uma nova busca.
+            self._buscar_preview()
 
 
 if __name__ == '__main__':
