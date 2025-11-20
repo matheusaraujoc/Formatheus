@@ -233,6 +233,10 @@ class ABNTHelperApp(QWidget):
         
         self.is_search_bar_visible = self.config['ui_settings']['search_bar_visible']
 
+        self.is_search_bar_visible = self.config['ui_settings']['search_bar_visible']
+
+        self.is_pagination_bar_visible = self.config['ui_settings'].get('pagination_bar_visible', True)
+
         self.BASE_ZOOM_FACTOR = 0.75
         initial_editor_width = 800
         initial_preview_width = 600
@@ -336,6 +340,13 @@ class ABNTHelperApp(QWidget):
         self.btn_buscar_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"next{suffix}.png")))
         self.btn_fechar_busca.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
         self.btn_atualizar_preview.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"restore{suffix}.png")))
+
+        # --- NOVO: Paginação ---
+        if hasattr(self, 'btn_pag_anterior'):
+            self.btn_pag_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-left{suffix}.png")))
+            self.btn_pag_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-right{suffix}.png")))
+            # Botão de fechar a paginação (usa o mesmo ícone 'x')
+            self.btn_fechar_paginacao.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
         
         # 6. Ícones Personalizados (assets) da Aba de Conteúdo
         if hasattr(self, 'aba_conteudo'):
@@ -392,6 +403,16 @@ class ABNTHelperApp(QWidget):
         menu_visualizacao = menu_bar.addMenu("&Visualização")
         grupo_modos = QActionGroup(self)
         grupo_modos.setExclusive(True)
+
+        #BARRA DE PAGINAÇÃO
+
+        menu_visualizacao.addSeparator()
+        
+        # Ação para mostrar/ocultar barra de paginação
+        self.acao_toggle_paginacao = QAction("Exibir Paginação", self, checkable=True)
+        self.acao_toggle_paginacao.setChecked(self.is_pagination_bar_visible)
+        self.acao_toggle_paginacao.triggered.connect(self._alternar_barra_paginacao)
+        menu_visualizacao.addAction(self.acao_toggle_paginacao)
         
         self.acao_modo_lado_a_lado = QAction("Pré-visualização Lado a Lado", self, checkable=True)
         self.acao_modo_lado_a_lado.setChecked(True)
@@ -672,9 +693,9 @@ class ABNTHelperApp(QWidget):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0,0,0,0)
-        layout.setSpacing(0) # Remove espaçamento vertical extra entre as barras
+        layout.setSpacing(0) 
 
-        # --- 1. BARRA DE BUSCA (Mantida) ---
+        # --- 1. BARRA DE BUSCA (Topo) ---
         self.busca_toolbar = QWidget()
         busca_layout = QHBoxLayout(self.busca_toolbar)
         busca_layout.setContentsMargins(2, 5, 2, 5)
@@ -687,6 +708,7 @@ class ABNTHelperApp(QWidget):
         self.busca_case_sensitive = QCheckBox("Diferenciar M/m")
         self.btn_fechar_busca = QPushButton("Fechar")
 
+        # Estilização básica para botões de ferramenta
         self.btn_buscar_anterior.setProperty("cssClass", "outline-button")
         self.btn_buscar_proximo.setProperty("cssClass", "outline-button")
         self.btn_fechar_busca.setProperty("cssClass", "outline-button") 
@@ -699,93 +721,103 @@ class ABNTHelperApp(QWidget):
         busca_layout.addStretch()
         busca_layout.addWidget(self.btn_fechar_busca)
         
-        # Adiciona a barra de busca ao layout (inicia oculta conforme config)
         layout.addWidget(self.busca_toolbar)
         self.busca_toolbar.setVisible(self.is_search_bar_visible)
         
-        # --- 2. NOVA BARRA DE PAGINAÇÃO ---
+        # --- 2. ÁREA DE VISUALIZAÇÃO (Meio - Expande) ---
+        self.preview_display = QWebEngineView()
+        self.preview_display.setHtml("<html><body><h1>Pré-Visualização</h1><p>A pré-visualização será atualizada aqui.</p></body></html>")
+        self.preview_display.setZoomFactor(self.BASE_ZOOM_FACTOR)
+        
+        layout.addWidget(self.preview_display, 1) # Stretch 1 garante que ocupe o meio
+
+        # --- 3. NOVA BARRA DE PAGINAÇÃO (Fundo) ---
         self.paginacao_toolbar = QWidget()
-        self.paginacao_toolbar.setStyleSheet("background-color: transparent;") # Fundo transparente
+        # Leve borda superior para separar do conteúdo
+        self.paginacao_toolbar.setStyleSheet("border-top: 1px solid #CCCCCC;") 
+        
         pag_layout = QHBoxLayout(self.paginacao_toolbar)
         pag_layout.setContentsMargins(5, 2, 5, 2)
-        pag_layout.setAlignment(Qt.AlignmentFlag.AlignCenter) # Centraliza os controles
-
-        # Botão Anterior
+        
+        # Container centralizado para os botões de navegação
+        container_nav = QWidget()
+        layout_nav = QHBoxLayout(container_nav)
+        layout_nav.setContentsMargins(0,0,0,0)
+        
         self.btn_pag_anterior = QPushButton()
         self.btn_pag_anterior.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pag_anterior.setToolTip("Página Anterior")
         self.btn_pag_anterior.setStyleSheet("border: none; background: transparent;") 
         self.btn_pag_anterior.setIconSize(QtCore.QSize(24, 24))
 
-        # Input numérico (Página Atual)
         self.spin_pagina = QtWidgets.QSpinBox()
-        self.spin_pagina.setRange(1, 1) # Será ajustado dinamicamente pelo JS
+        self.spin_pagina.setRange(1, 1) 
         self.spin_pagina.setFixedWidth(70)
         self.spin_pagina.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.spin_pagina.setKeyboardTracking(False) # Só dispara ao terminar de digitar (Enter/FocusOut)
-        self.spin_pagina.setToolTip("Digite o número da página e pressione Enter")
+        self.spin_pagina.setKeyboardTracking(False) 
+        self.spin_pagina.setToolTip("Digite e pressione Enter")
 
-        # Label Total (de XX)
         self.lbl_total_paginas = QLabel("de 1")
-        self.lbl_total_paginas.setStyleSheet("margin-left: 5px; margin-right: 5px; font-weight: bold;")
+        self.lbl_total_paginas.setStyleSheet("margin-left: 5px; margin-right: 5px; font-weight: bold; border: none;")
 
-        # Botão Próximo
         self.btn_pag_proximo = QPushButton()
         self.btn_pag_proximo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pag_proximo.setToolTip("Próxima Página")
         self.btn_pag_proximo.setStyleSheet("border: none; background: transparent;")
         self.btn_pag_proximo.setIconSize(QtCore.QSize(24, 24))
+
+        layout_nav.addWidget(self.btn_pag_anterior)
+        layout_nav.addWidget(self.spin_pagina)
+        layout_nav.addWidget(self.lbl_total_paginas)
+        layout_nav.addWidget(self.btn_pag_proximo)
+
+        # Botão Fechar Paginação (canto direito)
+        self.btn_fechar_paginacao = QPushButton()
+        self.btn_fechar_paginacao.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_fechar_paginacao.setToolTip("Ocultar Barra de Paginação")
+        self.btn_fechar_paginacao.setStyleSheet("border: none; background: transparent;")
         
-        # Define ícones iniciais (serão redefinidos por _atualizar_icones_do_tema)
+        # Montagem do Layout da Barra Inferior
+        pag_layout.addStretch() # Espaço à esquerda
+        pag_layout.addWidget(container_nav) # Navegação no centro
+        pag_layout.addStretch() # Espaço à direita
+        pag_layout.addWidget(self.btn_fechar_paginacao) # Fechar no canto
+        
+        # Define ícones iniciais
         suffix = "-white" if self.is_dark_theme else ""
         try:
             self.btn_pag_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-left{suffix}.png")))
             self.btn_pag_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-right{suffix}.png")))
-        except Exception:
-            pass # Se falhar aqui, o _atualizar_icones_do_tema corrige depois
-
-        pag_layout.addWidget(self.btn_pag_anterior)
-        pag_layout.addWidget(self.spin_pagina)
-        pag_layout.addWidget(self.lbl_total_paginas)
-        pag_layout.addWidget(self.btn_pag_proximo)
+            self.btn_fechar_paginacao.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
+        except Exception: pass
 
         layout.addWidget(self.paginacao_toolbar)
+        
+        # Define visibilidade inicial baseada na config
+        self.paginacao_toolbar.setVisible(self.is_pagination_bar_visible)
 
-        # --- 3. ÁREA DE VISUALIZAÇÃO (WEB ENGINE) ---
-        self.preview_display = QWebEngineView()
-        self.preview_display.setHtml("<html><body><h1>Pré-Visualização</h1><p>A pré-visualização será atualizada aqui.</p></body></html>")
-        self.preview_display.setZoomFactor(self.BASE_ZOOM_FACTOR)
-        
-        layout.addWidget(self.preview_display, 1)
-        
-        # --- 4. BOTÃO DE ATUALIZAÇÃO MANUAL (Visível apenas no modo abas) ---
+        # --- 4. BOTÃO DE ATUALIZAÇÃO MANUAL ---
         self.btn_atualizar_preview = QPushButton("Atualizar Pré-Visualização")
         self.btn_atualizar_preview.clicked.connect(self._atualizar_preview)
         self.btn_atualizar_preview.setVisible(False)
         layout.addWidget(self.btn_atualizar_preview)
         
         # --- 5. CONEXÕES ---
-        
-        # Conexões da Busca
         self.btn_buscar_proximo.clicked.connect(self._buscar_proximo_preview)
         self.btn_buscar_anterior.clicked.connect(self._buscar_anterior_preview)
         self.busca_input.returnPressed.connect(self._buscar_proximo_preview)
         self.btn_fechar_busca.clicked.connect(self._alternar_barra_busca)
 
-        # Conexões de Scroll e Zoom (Existentes)
         self.preview_display.loadFinished.connect(self._restaurar_scroll_preview)
-
-        # --- NOVAS CONEXÕES DE PAGINAÇÃO ---
-        # A. Injeta o script que monitora a página visível (IntersectionObserver)
         self.preview_display.loadFinished.connect(self._injetar_js_paginacao)
-        
-        # B. Recebe o sinal do JS (via mudança de título) para atualizar o contador "1 de X"
         self.preview_display.titleChanged.connect(self._on_titulo_web_changed)
 
-        # C. Envia comandos para o JS (Navegação)
         self.btn_pag_anterior.clicked.connect(self._ir_para_pagina_anterior)
         self.btn_pag_proximo.clicked.connect(self._ir_para_proxima_pagina)
         self.spin_pagina.valueChanged.connect(self._ir_para_pagina_especifica)
+        
+        # Conexão do botão fechar paginação
+        self.btn_fechar_paginacao.clicked.connect(self._alternar_barra_paginacao)
         
         return widget
 
@@ -1614,6 +1646,23 @@ class ABNTHelperApp(QWidget):
         self._executar_scroll_para_pagina(valor)
 
     # ----------------------------------
+
+    @QtCore.Slot()
+    def _alternar_barra_paginacao(self):
+        """Mostra ou oculta a barra de paginação inferior."""
+        is_visible = self.paginacao_toolbar.isVisible()
+        new_visibility = not is_visible
+        
+        self.paginacao_toolbar.setVisible(new_visibility)
+        
+        # Atualiza estado da Action no menu (se existir)
+        if hasattr(self, 'acao_toggle_paginacao'):
+            self.acao_toggle_paginacao.setChecked(new_visibility)
+            
+        # Salva na config
+        self.is_pagination_bar_visible = new_visibility
+        self.config['ui_settings']['pagination_bar_visible'] = new_visibility
+        gerenciador_config.salvar_config(self.config)
 
 
 if __name__ == '__main__':
