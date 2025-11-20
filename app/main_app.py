@@ -362,9 +362,9 @@ class ABNTHelperApp(QWidget):
         menu_bar = QMenuBar(self)
         self.main_layout.setMenuBar(menu_bar)
 
+        # --- 1. Menu ARQUIVO ---
         menu_arquivo = menu_bar.addMenu("&Arquivo")
         
-        # Convertido para self.
         self.acao_novo = QAction("&Novo Projeto", self)
         self.acao_novo.triggered.connect(self._novo_projeto)
         menu_arquivo.addAction(self.acao_novo)
@@ -393,26 +393,12 @@ class ABNTHelperApp(QWidget):
         self.acao_sair.triggered.connect(self.close)
         menu_arquivo.addAction(self.acao_sair)
         
-        menu_editar = menu_bar.addMenu("&Editar")
-        
-        self.acao_localizar = QAction("&Localizar...", self)
-        self.acao_localizar.setShortcut(QKeySequence.StandardKey.Find)
-        self.acao_localizar.triggered.connect(self._alternar_barra_busca)
-        menu_editar.addAction(self.acao_localizar)
-
+        # --- 2. Menu VISUALIZAÇÃO (Editado) ---
         menu_visualizacao = menu_bar.addMenu("&Visualização")
+        
+        # Grupo de Modos de Visualização (Lado a Lado / Aba)
         grupo_modos = QActionGroup(self)
         grupo_modos.setExclusive(True)
-
-        #BARRA DE PAGINAÇÃO
-
-        menu_visualizacao.addSeparator()
-        
-        # Ação para mostrar/ocultar barra de paginação
-        self.acao_toggle_paginacao = QAction("Exibir Paginação", self, checkable=True)
-        self.acao_toggle_paginacao.setChecked(self.is_pagination_bar_visible)
-        self.acao_toggle_paginacao.triggered.connect(self._alternar_barra_paginacao)
-        menu_visualizacao.addAction(self.acao_toggle_paginacao)
         
         self.acao_modo_lado_a_lado = QAction("Pré-visualização Lado a Lado", self, checkable=True)
         self.acao_modo_lado_a_lado.setChecked(True)
@@ -426,35 +412,59 @@ class ABNTHelperApp(QWidget):
         grupo_modos.addAction(self.acao_modo_aba)
 
         menu_visualizacao.addSeparator()
+
+        # Ação Localizar (Movida de Editar para cá e transformada em Toggle)
+        self.acao_localizar = QAction("Exibir Barra de Busca", self, checkable=True)
+        self.acao_localizar.setShortcut(QKeySequence.StandardKey.Find) # Atalho Ctrl+F
+        self.acao_localizar.setChecked(self.is_search_bar_visible) # Sincroniza com estado inicial
+        self.acao_localizar.triggered.connect(self._alternar_barra_busca)
+        menu_visualizacao.addAction(self.acao_localizar)
+
+        # Ação Paginação (Novo Toggle)
+        self.acao_toggle_paginacao = QAction("Exibir Paginação", self, checkable=True)
+        self.acao_toggle_paginacao.setChecked(self.is_pagination_bar_visible) # Sincroniza com estado inicial
+        self.acao_toggle_paginacao.triggered.connect(self._alternar_barra_paginacao)
+        menu_visualizacao.addAction(self.acao_toggle_paginacao)
+
+        menu_visualizacao.addSeparator()
+        
+        # Alternar Tema
         self.acao_alternar_tema = QAction("Alternar Tema (Claro/Escuro) 🌗", self)
         self.acao_alternar_tema.triggered.connect(self.toggle_theme)
         menu_visualizacao.addAction(self.acao_alternar_tema)
         self.acao_alternar_tema.setEnabled(HAS_THEME_LIB)
 
+        # --- 3. Conteúdo Principal (Abas) ---
         self.tabs = QTabWidget()
         self.aba_conteudo = AbaConteudo(self.documento)
         
+        # Conecta sinal de navegação da árvore para o preview
         self.aba_conteudo.topicoSelecionadoParaNavegacao.connect(self._navegar_preview_para_ancora)
         
         self.tabs.addTab(self._criar_aba_geral(), "Geral e Pré-Textual")
         self.tabs.addTab(self.aba_conteudo, "Conteúdo Textual (Estrutura)")
         self.tabs.addTab(self._criar_aba_referencias(), "Referências")
         
+        # Cria o painel de preview (com as novas barras)
         self.preview_container = self._criar_painel_preview() 
 
-        # Botão Único de Exportação
+        # --- 4. Botão de Exportação (Canto Superior Direito) ---
         self.btn_exportar_geral = QPushButton("Exportar Documento")
         self.btn_exportar_geral.setToolTip("Exportar para PDF ou DOCX com opções personalizadas")
         self.btn_exportar_geral.setProperty("cssClass", "primary")
         
-        # Ícone (use um ícone de 'download' ou 'export' se tiver, ou reutilize 'save')
+        # Tenta carregar ícone de salvar/exportar
         suffix = "-white" if self.is_dark_theme else ""
-        self.btn_exportar_geral.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png"))) # Exemplo
+        try:
+            self.btn_exportar_geral.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"save{suffix}.png")))
+        except: 
+            pass # Se falhar, fica sem ícone
         
         self.btn_exportar_geral.clicked.connect(self._abrir_dialogo_exportacao)
 
         self.tabs.setCornerWidget(self.btn_exportar_geral, QtCore.Qt.Corner.TopRightCorner)
         
+        # Aplica o layout inicial (Preview lado a lado ou abas)
         self._reconfigurar_layout()
 
     def _criar_aba_geral(self):
@@ -703,15 +713,31 @@ class ABNTHelperApp(QWidget):
         self.busca_input = QLineEdit()
         self.busca_input.setPlaceholderText("Buscar na pré-visualização...")
         
-        self.btn_buscar_anterior = QPushButton("Anterior")
-        self.btn_buscar_proximo = QPushButton("Próximo")
-        self.busca_case_sensitive = QCheckBox("Diferenciar M/m")
-        self.btn_fechar_busca = QPushButton("Fechar")
+        # --- ALTERAÇÃO AQUI: Botões agora sem texto, estilo "Clean" ---
+        
+        # Botão Anterior
+        self.btn_buscar_anterior = QPushButton() # Texto removido
+        self.btn_buscar_anterior.setToolTip("Buscar Anterior")
+        self.btn_buscar_anterior.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_buscar_anterior.setStyleSheet("border: none; background: transparent;") 
+        self.btn_buscar_anterior.setIconSize(QtCore.QSize(24, 24))
 
-        # Estilização básica para botões de ferramenta
-        self.btn_buscar_anterior.setProperty("cssClass", "outline-button")
-        self.btn_buscar_proximo.setProperty("cssClass", "outline-button")
-        self.btn_fechar_busca.setProperty("cssClass", "outline-button") 
+        # Botão Próximo
+        self.btn_buscar_proximo = QPushButton() # Texto removido
+        self.btn_buscar_proximo.setToolTip("Buscar Próximo")
+        self.btn_buscar_proximo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_buscar_proximo.setStyleSheet("border: none; background: transparent;")
+        self.btn_buscar_proximo.setIconSize(QtCore.QSize(24, 24))
+        
+        # Checkbox
+        self.busca_case_sensitive = QCheckBox("Diferenciar M/m")
+        
+        # Botão Fechar
+        self.btn_fechar_busca = QPushButton() # Texto removido
+        self.btn_fechar_busca.setToolTip("Fechar Barra de Busca")
+        self.btn_fechar_busca.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_fechar_busca.setStyleSheet("border: none; background: transparent;")
+        self.btn_fechar_busca.setIconSize(QtCore.QSize(24, 24))
 
         busca_layout.addWidget(QLabel("Localizar:"))
         busca_layout.addWidget(self.busca_input)
@@ -729,11 +755,10 @@ class ABNTHelperApp(QWidget):
         self.preview_display.setHtml("<html><body><h1>Pré-Visualização</h1><p>A pré-visualização será atualizada aqui.</p></body></html>")
         self.preview_display.setZoomFactor(self.BASE_ZOOM_FACTOR)
         
-        layout.addWidget(self.preview_display, 1) # Stretch 1 garante que ocupe o meio
+        layout.addWidget(self.preview_display, 1) 
 
-        # --- 3. NOVA BARRA DE PAGINAÇÃO (Fundo) ---
+        # --- 3. BARRA DE PAGINAÇÃO (Fundo) ---
         self.paginacao_toolbar = QWidget()
-        # Leve borda superior para separar do conteúdo
         self.paginacao_toolbar.setStyleSheet("border-top: 1px solid #CCCCCC;") 
         
         pag_layout = QHBoxLayout(self.paginacao_toolbar)
@@ -771,17 +796,18 @@ class ABNTHelperApp(QWidget):
         layout_nav.addWidget(self.lbl_total_paginas)
         layout_nav.addWidget(self.btn_pag_proximo)
 
-        # Botão Fechar Paginação (canto direito)
+        # Botão Fechar Paginação
         self.btn_fechar_paginacao = QPushButton()
         self.btn_fechar_paginacao.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_fechar_paginacao.setToolTip("Ocultar Barra de Paginação")
         self.btn_fechar_paginacao.setStyleSheet("border: none; background: transparent;")
+        self.btn_fechar_paginacao.setIconSize(QtCore.QSize(24, 24))
         
         # Montagem do Layout da Barra Inferior
-        pag_layout.addStretch() # Espaço à esquerda
-        pag_layout.addWidget(container_nav) # Navegação no centro
-        pag_layout.addStretch() # Espaço à direita
-        pag_layout.addWidget(self.btn_fechar_paginacao) # Fechar no canto
+        pag_layout.addStretch() 
+        pag_layout.addWidget(container_nav) 
+        pag_layout.addStretch() 
+        pag_layout.addWidget(self.btn_fechar_paginacao) 
         
         # Define ícones iniciais
         suffix = "-white" if self.is_dark_theme else ""
@@ -792,8 +818,6 @@ class ABNTHelperApp(QWidget):
         except Exception: pass
 
         layout.addWidget(self.paginacao_toolbar)
-        
-        # Define visibilidade inicial baseada na config
         self.paginacao_toolbar.setVisible(self.is_pagination_bar_visible)
 
         # --- 4. BOTÃO DE ATUALIZAÇÃO MANUAL ---
@@ -816,7 +840,6 @@ class ABNTHelperApp(QWidget):
         self.btn_pag_proximo.clicked.connect(self._ir_para_proxima_pagina)
         self.spin_pagina.valueChanged.connect(self._ir_para_pagina_especifica)
         
-        # Conexão do botão fechar paginação
         self.btn_fechar_paginacao.clicked.connect(self._alternar_barra_paginacao)
         
         return widget
@@ -857,12 +880,17 @@ class ABNTHelperApp(QWidget):
 
     @QtCore.Slot()
     def _alternar_barra_busca(self):
+        """Mostra ou oculta a barra de busca e atualiza o menu."""
         is_visible = self.busca_toolbar.isVisible()
         new_visibility = not is_visible 
         
         self.busca_toolbar.setVisible(new_visibility)
         if new_visibility:
             self.busca_input.setFocus()
+        
+        # Sincroniza o checkbox do menu "Visualização"
+        if hasattr(self, 'acao_localizar'):
+            self.acao_localizar.setChecked(new_visibility)
         
         self.is_search_bar_visible = new_visibility
         self.config['ui_settings']['search_bar_visible'] = self.is_search_bar_visible
