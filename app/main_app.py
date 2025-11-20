@@ -340,6 +340,12 @@ class ABNTHelperApp(QWidget):
         # 6. Ícones Personalizados (assets) da Aba de Conteúdo
         if hasattr(self, 'aba_conteudo'):
             self.aba_conteudo.update_theme_icons(is_dark)
+        
+        # --- NOVO: Ícones de Paginação ---
+        # Verifica se os botões já foram criados (para evitar erro na inicialização)
+        if hasattr(self, 'btn_pag_anterior') and hasattr(self, 'btn_pag_proximo'):
+            self.btn_pag_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-left{suffix}.png")))
+            self.btn_pag_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-right{suffix}.png")))
 
     def _build_ui(self):
         menu_bar = QMenuBar(self)
@@ -666,13 +672,16 @@ class ABNTHelperApp(QWidget):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0,0,0,0)
-        
+        layout.setSpacing(0) # Remove espaçamento vertical extra entre as barras
+
+        # --- 1. BARRA DE BUSCA (Mantida) ---
         self.busca_toolbar = QWidget()
         busca_layout = QHBoxLayout(self.busca_toolbar)
         busca_layout.setContentsMargins(2, 5, 2, 5)
+        
         self.busca_input = QLineEdit()
         self.busca_input.setPlaceholderText("Buscar na pré-visualização...")
-        # Convertido para self.
+        
         self.btn_buscar_anterior = QPushButton("Anterior")
         self.btn_buscar_proximo = QPushButton("Próximo")
         self.busca_case_sensitive = QCheckBox("Diferenciar M/m")
@@ -689,27 +698,94 @@ class ABNTHelperApp(QWidget):
         busca_layout.addWidget(self.busca_case_sensitive)
         busca_layout.addStretch()
         busca_layout.addWidget(self.btn_fechar_busca)
-        layout.addWidget(self.busca_toolbar)
         
+        # Adiciona a barra de busca ao layout (inicia oculta conforme config)
+        layout.addWidget(self.busca_toolbar)
         self.busca_toolbar.setVisible(self.is_search_bar_visible)
         
+        # --- 2. NOVA BARRA DE PAGINAÇÃO ---
+        self.paginacao_toolbar = QWidget()
+        self.paginacao_toolbar.setStyleSheet("background-color: transparent;") # Fundo transparente
+        pag_layout = QHBoxLayout(self.paginacao_toolbar)
+        pag_layout.setContentsMargins(5, 2, 5, 2)
+        pag_layout.setAlignment(Qt.AlignmentFlag.AlignCenter) # Centraliza os controles
+
+        # Botão Anterior
+        self.btn_pag_anterior = QPushButton()
+        self.btn_pag_anterior.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_pag_anterior.setToolTip("Página Anterior")
+        self.btn_pag_anterior.setStyleSheet("border: none; background: transparent;") 
+        self.btn_pag_anterior.setIconSize(QtCore.QSize(24, 24))
+
+        # Input numérico (Página Atual)
+        self.spin_pagina = QtWidgets.QSpinBox()
+        self.spin_pagina.setRange(1, 1) # Será ajustado dinamicamente pelo JS
+        self.spin_pagina.setFixedWidth(70)
+        self.spin_pagina.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.spin_pagina.setKeyboardTracking(False) # Só dispara ao terminar de digitar (Enter/FocusOut)
+        self.spin_pagina.setToolTip("Digite o número da página e pressione Enter")
+
+        # Label Total (de XX)
+        self.lbl_total_paginas = QLabel("de 1")
+        self.lbl_total_paginas.setStyleSheet("margin-left: 5px; margin-right: 5px; font-weight: bold;")
+
+        # Botão Próximo
+        self.btn_pag_proximo = QPushButton()
+        self.btn_pag_proximo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_pag_proximo.setToolTip("Próxima Página")
+        self.btn_pag_proximo.setStyleSheet("border: none; background: transparent;")
+        self.btn_pag_proximo.setIconSize(QtCore.QSize(24, 24))
+        
+        # Define ícones iniciais (serão redefinidos por _atualizar_icones_do_tema)
+        suffix = "-white" if self.is_dark_theme else ""
+        try:
+            self.btn_pag_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-left{suffix}.png")))
+            self.btn_pag_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-right{suffix}.png")))
+        except Exception:
+            pass # Se falhar aqui, o _atualizar_icones_do_tema corrige depois
+
+        pag_layout.addWidget(self.btn_pag_anterior)
+        pag_layout.addWidget(self.spin_pagina)
+        pag_layout.addWidget(self.lbl_total_paginas)
+        pag_layout.addWidget(self.btn_pag_proximo)
+
+        layout.addWidget(self.paginacao_toolbar)
+
+        # --- 3. ÁREA DE VISUALIZAÇÃO (WEB ENGINE) ---
         self.preview_display = QWebEngineView()
         self.preview_display.setHtml("<html><body><h1>Pré-Visualização</h1><p>A pré-visualização será atualizada aqui.</p></body></html>")
-        
         self.preview_display.setZoomFactor(self.BASE_ZOOM_FACTOR)
         
-        self.preview_display.loadFinished.connect(self._restaurar_scroll_preview)
         layout.addWidget(self.preview_display, 1)
         
+        # --- 4. BOTÃO DE ATUALIZAÇÃO MANUAL (Visível apenas no modo abas) ---
         self.btn_atualizar_preview = QPushButton("Atualizar Pré-Visualização")
         self.btn_atualizar_preview.clicked.connect(self._atualizar_preview)
         self.btn_atualizar_preview.setVisible(False)
         layout.addWidget(self.btn_atualizar_preview)
         
+        # --- 5. CONEXÕES ---
+        
+        # Conexões da Busca
         self.btn_buscar_proximo.clicked.connect(self._buscar_proximo_preview)
         self.btn_buscar_anterior.clicked.connect(self._buscar_anterior_preview)
         self.busca_input.returnPressed.connect(self._buscar_proximo_preview)
         self.btn_fechar_busca.clicked.connect(self._alternar_barra_busca)
+
+        # Conexões de Scroll e Zoom (Existentes)
+        self.preview_display.loadFinished.connect(self._restaurar_scroll_preview)
+
+        # --- NOVAS CONEXÕES DE PAGINAÇÃO ---
+        # A. Injeta o script que monitora a página visível (IntersectionObserver)
+        self.preview_display.loadFinished.connect(self._injetar_js_paginacao)
+        
+        # B. Recebe o sinal do JS (via mudança de título) para atualizar o contador "1 de X"
+        self.preview_display.titleChanged.connect(self._on_titulo_web_changed)
+
+        # C. Envia comandos para o JS (Navegação)
+        self.btn_pag_anterior.clicked.connect(self._ir_para_pagina_anterior)
+        self.btn_pag_proximo.clicked.connect(self._ir_para_proxima_pagina)
+        self.spin_pagina.valueChanged.connect(self._ir_para_pagina_especifica)
         
         return widget
 
@@ -1432,6 +1508,112 @@ class ABNTHelperApp(QWidget):
                 del self._pdf_opcoes_pendentes
         else:
             QMessageBox.critical(self, "Erro", "Falha ao gerar o arquivo PDF.\nVerifique se ele está aberto em outro programa.")
+
+    # --- LÓGICA DE PAGINAÇÃO (NOVO) ---
+
+    @QtCore.Slot(bool)
+    def _injetar_js_paginacao(self, ok):
+        """
+        Injeta o JavaScript que monitora qual página está visível
+        e atualiza o título do documento para comunicar ao Python.
+        """
+        if not ok: return
+
+        # Script JS:
+        # 1. Encontra todas as divs com classe 'pagina'.
+        # 2. Cria um IntersectionObserver.
+        # 3. Quando uma página ocupa >50% da tela, muda o document.title.
+        js_code = """
+        (function() {
+            var paginas = document.getElementsByClassName('pagina');
+            
+            // Informa o total de páginas imediatamente
+            document.title = "PAGE_UPDATE:1:" + paginas.length;
+
+            var observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if(entry.isIntersecting) {
+                        // Converte a HTMLCollection para Array para achar o índice
+                        var index = Array.prototype.indexOf.call(paginas, entry.target);
+                        if (index !== -1) {
+                            // Comunica: PAGE_UPDATE : IndiceAtual(1-based) : Total
+                            document.title = "PAGE_UPDATE:" + (index + 1) + ":" + paginas.length;
+                        }
+                    }
+                });
+            }, {
+                root: null, // Viewport
+                threshold: 0.5 // Dispara quando 50% da página está visível
+            });
+
+            for (var i = 0; i < paginas.length; i++) {
+                observer.observe(paginas[i]);
+            }
+        })();
+        """
+        self.preview_display.page().runJavaScript(js_code)
+
+    @QtCore.Slot(str)
+    def _on_titulo_web_changed(self, title):
+        """
+        Recebe o sinal do JS através da mudança de título.
+        Formato esperado: "PAGE_UPDATE:Atual:Total"
+        """
+        if not title.startswith("PAGE_UPDATE:"):
+            return
+
+        try:
+            _, atual_str, total_str = title.split(":")
+            atual = int(atual_str)
+            total = int(total_str)
+
+            # Atualiza o Total
+            self.lbl_total_paginas.setText(f"de {total}")
+            self.spin_pagina.setMaximum(total)
+
+            # Atualiza o SpinBox sem disparar o sinal de valueChanged 
+            # (para evitar loop infinito de scroll)
+            self.spin_pagina.blockSignals(True)
+            self.spin_pagina.setValue(atual)
+            self.spin_pagina.blockSignals(False)
+
+            # Atualiza estado dos botões
+            self.btn_pag_anterior.setEnabled(atual > 1)
+            self.btn_pag_proximo.setEnabled(atual < total)
+
+        except ValueError:
+            pass
+
+    def _executar_scroll_para_pagina(self, numero_pagina):
+        """Helper para rodar o JS de scroll."""
+        # O índice no JS é 0-based, mas a UI é 1-based
+        index = numero_pagina - 1
+        js = f"""
+        var pags = document.getElementsByClassName('pagina');
+        if (pags.length > {index}) {{
+            pags[{index}].scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+        }}
+        """
+        self.preview_display.page().runJavaScript(js)
+
+    @QtCore.Slot()
+    def _ir_para_pagina_anterior(self):
+        valor_atual = self.spin_pagina.value()
+        if valor_atual > 1:
+            self._executar_scroll_para_pagina(valor_atual - 1)
+
+    @QtCore.Slot()
+    def _ir_para_proxima_pagina(self):
+        valor_atual = self.spin_pagina.value()
+        if valor_atual < self.spin_pagina.maximum():
+            self._executar_scroll_para_pagina(valor_atual + 1)
+
+    @QtCore.Slot(int)
+    def _ir_para_pagina_especifica(self, valor):
+        # Chamado quando o usuário digita ou clica nas setinhas do spinbox
+        self._executar_scroll_para_pagina(valor)
+
+    # ----------------------------------
 
 
 if __name__ == '__main__':
