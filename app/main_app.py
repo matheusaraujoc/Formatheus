@@ -289,24 +289,41 @@ class ABNTHelperApp(QWidget):
 
     @QtCore.Slot()
     def toggle_theme(self):
-        """Alterna o tema da aplicação inteira."""
+        """Alterna o tema da aplicação inteira com feedback instantâneo no preview."""
         if not HAS_THEME_LIB: return
         
         self.is_dark_theme = not self.is_dark_theme
         theme = "dark" if self.is_dark_theme else "light"
         
-        # Atualiza ícones (e agora bordas também)
+        # 1. Atualiza UI do PySide (Imediato)
         self._atualizar_icones_do_tema(self.is_dark_theme)
-        
         qss = qdarktheme.load_stylesheet(theme)
         qss += stylesheet.get_style_sheet() 
-        
         QApplication.instance().setStyleSheet(qss)
         
+        # 2. INJEÇÃO DE JS (CORREÇÃO DO DELAY):
+        # Atualiza as variáveis CSS na página atual IMEDIATAMENTE.
+        if self.is_dark_theme:
+            # Cores Dark
+            c_thumb = "#5c5c5c"
+            c_hover = "#808080"
+            c_body = "#202124"
+        else:
+            # Cores Light
+            c_thumb = "#c1c1c1"
+            c_hover = "#a8a8a8"
+            c_body = "#E0E0E0"
+
+        js_instant_update = f"""
+            document.documentElement.style.setProperty('--sb-thumb-color', '{c_thumb}');
+            document.documentElement.style.setProperty('--sb-thumb-hover-color', '{c_hover}');
+            document.documentElement.style.setProperty('--bg-body-color', '{c_body}');
+        """
+        self.preview_display.page().runJavaScript(js_instant_update)
+
+        # 3. Salva config e agenda atualização completa (Backend)
         self.config['ui_settings']['theme'] = theme
         gerenciador_config.salvar_config(self.config)
-
-        # --- CORREÇÃO 2: Força a atualização do HTML para aplicar a nova Scrollbar ---
         self._atualizar_preview()
 
     def _atualizar_icones_do_tema(self, is_dark):

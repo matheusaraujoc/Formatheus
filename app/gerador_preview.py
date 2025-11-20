@@ -420,56 +420,52 @@ class GeradorHTMLPreview:
         
         cfg = self.doc_abnt.configuracoes
         
-        # --- Cores do Tema ---
+        # --- DEFINIÇÃO DAS CORES INICIAIS ---
         if is_dark_theme:
-            scrollbar_track = "transparent" 
-            scrollbar_thumb = "#5c5c5c"
-            scrollbar_thumb_hover = "#808080"
-            bg_body_color = "#202124"
+            # Cores Escuras
+            c_track = "transparent"
+            c_thumb = "#5c5c5c"
+            c_thumb_hover = "#808080"
+            c_bg_body = "#202124"
+            c_text_count_busca = "#ff6b6b" # Exemplo se usasse no CSS
         else:
-            scrollbar_track = "transparent"
-            scrollbar_thumb = "#c1c1c1"
-            scrollbar_thumb_hover = "#a8a8a8"
-            bg_body_color = "#E0E0E0"
+            # Cores Claras
+            c_track = "transparent"
+            c_thumb = "#c1c1c1"
+            c_thumb_hover = "#a8a8a8"
+            c_bg_body = "#E0E0E0"
+            c_text_count_busca = "red"
 
-        # --- SCRIPT DE CORREÇÃO DA SCROLLBAR (NOVO) ---
-        # Este script roda dentro da página. Ele detecta o 'devicePixelRatio' (Zoom)
-        # e ajusta a variável CSS --sb-width inversamente.
-        # Se o zoom aumenta, a largura em px diminui, mantendo o visual constante.
+        # --- SCRIPT DE CORREÇÃO DA SCROLLBAR (MANTIDO) ---
         js_scrollbar_fix = """
         <script>
             function updateScrollbarSize() {
-                // Define o tamanho visual desejado em pixels reais (ex: 16px)
                 const targetSize = 16;
                 const targetBorder = 4;
-                
-                // Pega o nível de zoom do navegador
                 const zoom = window.devicePixelRatio;
-                
-                // Calcula o tamanho CSS necessário para manter o visual constante
-                // Ex: Zoom 200% (2.0) -> Css precisa ser 8px para parecer 16px
                 const cssWidth = targetSize / zoom;
                 const cssBorder = targetBorder / zoom;
-                
-                // Aplica nas variáveis CSS
                 document.documentElement.style.setProperty('--sb-width', cssWidth + 'px');
                 document.documentElement.style.setProperty('--sb-border', cssBorder + 'px');
             }
-
-            // Atualiza ao carregar e sempre que redimensionar (o zoom dispara resize)
             window.addEventListener('resize', updateScrollbarSize);
             window.addEventListener('load', updateScrollbarSize);
-            
-            // Loop de segurança para garantir que pegue mudanças súbitas
             setInterval(updateScrollbarSize, 1000);
         </script>
         """
 
-        # --- CSS COM VARIÁVEIS DINÂMICAS ---
+        # --- CSS COM VARIÁVEIS DE COR E TAMANHO ---
+        # Note que agora as cores são definidas em :root usando as variáveis Python
         css_scrollbar = f"""
             :root {{
-                --sb-width: 16px;   /* Valor padrão, será sobrescrito pelo JS */
-                --sb-border: 4px;   /* Valor padrão */
+                --sb-width: 16px;
+                --sb-border: 4px;
+                
+                /* Variáveis de Cor */
+                --sb-track-color: {c_track};
+                --sb-thumb-color: {c_thumb};
+                --sb-thumb-hover-color: {c_thumb_hover};
+                --bg-body-color: {c_bg_body};
             }}
 
             /* Área total da barra */
@@ -479,21 +475,21 @@ class GeradorHTMLPreview:
                 background-color: transparent; 
             }}
             
-            /* O trilho (fundo da barra) */
+            /* O trilho */
             ::-webkit-scrollbar-track {{
-                background-color: {scrollbar_track};
+                background-color: var(--sb-track-color);
             }}
             
-            /* A parte móvel (o "thumb") */
+            /* A parte móvel */
             ::-webkit-scrollbar-thumb {{
-                background-color: {scrollbar_thumb};
+                background-color: var(--sb-thumb-color);
                 border-radius: 20px;       
-                border: var(--sb-border) solid transparent; /* Borda transparente cria o espaço */
+                border: var(--sb-border) solid transparent;
                 background-clip: content-box; 
             }}
             
             ::-webkit-scrollbar-thumb:hover {{
-                background-color: {scrollbar_thumb_hover};
+                background-color: var(--sb-thumb-hover-color);
             }}
             
             ::-webkit-scrollbar-corner {{
@@ -510,7 +506,7 @@ class GeradorHTMLPreview:
             body {{ 
                 font-family: 'Times New Roman', Times, serif; 
                 font-size: 12pt; 
-                background-color: {bg_body_color}; 
+                background-color: var(--bg-body-color); /* Usando variável */
                 counter-reset: page 3; 
                 margin: 0;
             }}
