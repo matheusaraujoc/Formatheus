@@ -412,7 +412,7 @@ class GeradorHTMLPreview:
         
         self._adicionar_elemento_bloco(f'<br><p><strong>Palavras-chave:</strong> {self.doc_abnt.palavras_chave.replace(";", ".")}.</p>', ALTURA_LINHA_TEXTO * 2)
 
-    def gerar_html(self) -> str:
+    def gerar_html(self, is_dark_theme=False, zoom_factor=1.0) -> str:
         self.paginas_html = []
         self.conteudo_pagina_atual = []
         self.altura_restante = ALTURA_CONTEUDO_PAGINA
@@ -420,131 +420,218 @@ class GeradorHTMLPreview:
         
         cfg = self.doc_abnt.configuracoes
         
-        html_style = """
+        # --- Cores do Tema ---
+        if is_dark_theme:
+            scrollbar_track = "transparent" 
+            scrollbar_thumb = "#5c5c5c"
+            scrollbar_thumb_hover = "#808080"
+            bg_body_color = "#202124"
+        else:
+            scrollbar_track = "transparent"
+            scrollbar_thumb = "#c1c1c1"
+            scrollbar_thumb_hover = "#a8a8a8"
+            bg_body_color = "#E0E0E0"
+
+        # --- SCRIPT DE CORREÇÃO DA SCROLLBAR (NOVO) ---
+        # Este script roda dentro da página. Ele detecta o 'devicePixelRatio' (Zoom)
+        # e ajusta a variável CSS --sb-width inversamente.
+        # Se o zoom aumenta, a largura em px diminui, mantendo o visual constante.
+        js_scrollbar_fix = """
+        <script>
+            function updateScrollbarSize() {
+                // Define o tamanho visual desejado em pixels reais (ex: 16px)
+                const targetSize = 16;
+                const targetBorder = 4;
+                
+                // Pega o nível de zoom do navegador
+                const zoom = window.devicePixelRatio;
+                
+                // Calcula o tamanho CSS necessário para manter o visual constante
+                // Ex: Zoom 200% (2.0) -> Css precisa ser 8px para parecer 16px
+                const cssWidth = targetSize / zoom;
+                const cssBorder = targetBorder / zoom;
+                
+                // Aplica nas variáveis CSS
+                document.documentElement.style.setProperty('--sb-width', cssWidth + 'px');
+                document.documentElement.style.setProperty('--sb-border', cssBorder + 'px');
+            }
+
+            // Atualiza ao carregar e sempre que redimensionar (o zoom dispara resize)
+            window.addEventListener('resize', updateScrollbarSize);
+            window.addEventListener('load', updateScrollbarSize);
+            
+            // Loop de segurança para garantir que pegue mudanças súbitas
+            setInterval(updateScrollbarSize, 1000);
+        </script>
+        """
+
+        # --- CSS COM VARIÁVEIS DINÂMICAS ---
+        css_scrollbar = f"""
+            :root {{
+                --sb-width: 16px;   /* Valor padrão, será sobrescrito pelo JS */
+                --sb-border: 4px;   /* Valor padrão */
+            }}
+
+            /* Área total da barra */
+            ::-webkit-scrollbar {{
+                width: var(--sb-width);
+                height: var(--sb-width);
+                background-color: transparent; 
+            }}
+            
+            /* O trilho (fundo da barra) */
+            ::-webkit-scrollbar-track {{
+                background-color: {scrollbar_track};
+            }}
+            
+            /* A parte móvel (o "thumb") */
+            ::-webkit-scrollbar-thumb {{
+                background-color: {scrollbar_thumb};
+                border-radius: 20px;       
+                border: var(--sb-border) solid transparent; /* Borda transparente cria o espaço */
+                background-clip: content-box; 
+            }}
+            
+            ::-webkit-scrollbar-thumb:hover {{
+                background-color: {scrollbar_thumb_hover};
+            }}
+            
+            ::-webkit-scrollbar-corner {{
+                background-color: transparent;
+            }}
+        """
+
+        html_style = f"""
         <style>
-            html { scroll-behavior: smooth; }
-            body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; background-color: #E0E0E0; counter-reset: page 3; }
-            .pagina {
+            {css_scrollbar}
+
+            html {{ scroll-behavior: smooth; }}
+            
+            body {{ 
+                font-family: 'Times New Roman', Times, serif; 
+                font-size: 12pt; 
+                background-color: {bg_body_color}; 
+                counter-reset: page 3; 
+                margin: 0;
+            }}
+            
+            .pagina {{
                 width: 21cm; height: 29.7cm; padding: 3cm 2cm 2cm 3cm;
                 margin: 20px auto; background-color: white;
                 box-shadow: 0 0 10px rgba(0,0,0,0.2); box-sizing: border-box;
                 position: relative; 
-                overflow: hidden; /* Isso esconde o texto que transborda */
+                overflow: hidden;
                 line-height: 1.5;
-            }
-            .pagina.capa, .pagina.folha-rosto {
+            }}
+            /* ... (MANTENHA O RESTANTE DO CSS IGUAL AO SEU CÓDIGO ANTERIOR) ... */
+            .pagina.capa, .pagina.folha-rosto {{
                 display: flex; flex-direction: column;
                 justify-content: space-between; text-align: center;
-            }
-            .capa-conteudo-meio {
+            }}
+            .capa-conteudo-meio {{
                 flex-grow: 1; display: flex;
                 flex-direction: column; justify-content: center;
-            }
-            .pagina:not(.pre-textual) { counter-increment: page; }
-            .pagina:not(.pre-textual)::after {
+            }}
+            .pagina:not(.pre-textual) {{ counter-increment: page; }}
+            .pagina:not(.pre-textual)::after {{
                 content: counter(page); position: absolute;
                 top: 1.5cm; right: 2cm; font-size: 12pt;
-            }
-            h1 { font-size: 12pt; font-weight: bold; text-transform: uppercase; margin-top: 1em; margin-bottom: 1em; }
+            }}
+            h1 {{ font-size: 12pt; font-weight: bold; text-transform: uppercase; margin-top: 1em; margin-bottom: 1em; }}
             
-            p { 
+            p {{ 
                 margin: 0; padding: 0; 
-                overflow-wrap: break-word; /* Padrão (quebra em espaços) */
-                word-wrap: break-word;     /* Compatibilidade */
-            }
+                overflow-wrap: break-word; 
+                word-wrap: break-word;     
+            }}
             
-            p.corpo-texto { text-align: justify; text-indent: 1.25cm; }
-            p.paragrafo-continuado { text-align: justify; text-indent: 0; }
-            .paragrafo-quebrado { text-align-last: justify; }
-            .capa p, .folha-rosto p { text-indent: 0; }
-            .bloco-texto-capa { white-space: normal; overflow-wrap: break-word; }
-            .natureza { text-indent: 0; margin-left: 8cm; font-size: 11pt; text-align: justify; }
-            .resumo-paragrafo { text-indent: 1.25cm; text-align: justify; }
-            .resumo-titulo-palavras-chave { text-indent: 0; font-weight: bold; margin-top: 1em;}
-            .referencia { text-align: justify; line-height: 1.0; margin-bottom: 12px; }
-            .legenda { font-size: 10pt; text-align: center; text-indent: 0; margin-bottom: 0.5em; }
-            .fonte { font-size: 10pt; text-align: left; text-indent: 0; margin-top: 2px; }
-            .formula-container { text-align: center; margin: 1em 0; }
-            .formula-legenda { font-size: 10pt; text-align: center; text-indent: 0; margin-top: 0.5em; }
-            table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 10pt; }
-            th, td { border: 1px solid black; padding: 4px; text-align: left; }
-            table.abnt { border: none; } table.abnt th, table.abnt td { border: none; }
-            table.abnt thead tr { border-top: 1px solid black; border-bottom: 1px solid black; }
-            table.abnt tbody tr:last-of-type { border-bottom: 1px solid black; }
-            img { display: block; margin: 1em auto; max-width: 100%; height: auto; }
-            .sumario-item { display: flex; justify-content: space-between; text-indent: 0; }
-            .sumario-item a { text-decoration: none; color: black; display: flex; width: 100%; }
-            .sumario-item a:hover { text-decoration: underline; }
-            .sumario-titulo { order: 1; white-space: nowrap; }
-            .sumario-dots { order: 2; flex-grow: 1; border-bottom: 1px dotted black; margin: 0 5px; transform: translateY(-4px); }
-            .sumario-pagina { order: 3; padding-left: 5px; }
-            .sumario-nivel-2 { margin-left: 2em; } .sumario-nivel-3 { margin-left: 4em; }
-            .brasao-container {
+            p.corpo-texto {{ text-align: justify; text-indent: 1.25cm; }}
+            p.paragrafo-continuado {{ text-align: justify; text-indent: 0; }}
+            .paragrafo-quebrado {{ text-align-last: justify; }}
+            .capa p, .folha-rosto p {{ text-indent: 0; }}
+            .bloco-texto-capa {{ white-space: normal; overflow-wrap: break-word; }}
+            .natureza {{ text-indent: 0; margin-left: 8cm; font-size: 11pt; text-align: justify; }}
+            .resumo-paragrafo {{ text-indent: 1.25cm; text-align: justify; }}
+            .resumo-titulo-palavras-chave {{ text-indent: 0; font-weight: bold; margin-top: 1em;}}
+            .referencia {{ text-align: justify; line-height: 1.0; margin-bottom: 12px; }}
+            .legenda {{ font-size: 10pt; text-align: center; text-indent: 0; margin-bottom: 0.5em; }}
+            .fonte {{ font-size: 10pt; text-align: left; text-indent: 0; margin-top: 2px; }}
+            .formula-container {{ text-align: center; margin: 1em 0; }}
+            .formula-legenda {{ font-size: 10pt; text-align: center; text-indent: 0; margin-top: 0.5em; }}
+            table {{ border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 10pt; }}
+            th, td {{ border: 1px solid black; padding: 4px; text-align: left; }}
+            table.abnt {{ border: none; }} table.abnt th, table.abnt td {{ border: none; }}
+            table.abnt thead tr {{ border-top: 1px solid black; border-bottom: 1px solid black; }}
+            table.abnt tbody tr:last-of-type {{ border-bottom: 1px solid black; }}
+            img {{ display: block; margin: 1em auto; max-width: 100%; height: auto; }}
+            .sumario-item {{ display: flex; justify-content: space-between; text-indent: 0; }}
+            .sumario-item a {{ text-decoration: none; color: black; display: flex; width: 100%; }}
+            .sumario-item a:hover {{ text-decoration: underline; }}
+            .sumario-titulo {{ order: 1; white-space: nowrap; }}
+            .sumario-dots {{ order: 2; flex-grow: 1; border-bottom: 1px dotted black; margin: 0 5px; transform: translateY(-4px); }}
+            .sumario-pagina {{ order: 3; padding-left: 5px; }}
+            .sumario-nivel-2 {{ margin-left: 2em; }} .sumario-nivel-3 {{ margin-left: 4em; }}
+            .brasao-container {{
                 min-height: 4cm; margin-bottom: 1cm;
                 display: flex; flex-direction: column; 
-            }
-            .brasoes-lado-a-lado {
+            }}
+            .brasoes-lado-a-lado {{
                 flex-direction: row; justify-content: space-between; align-items: center;
-            }
-            .brasoes-lado-a-lado .instituicao-central { flex-grow: 1; padding: 0 1cm; }
-            .brasao-container img { display: inline-block; margin: 0; max-height: 3.5cm; }
+            }}
+            .brasoes-lado-a-lado .instituicao-central {{ flex-grow: 1; padding: 0 1cm; }}
+            .brasao-container img {{ display: inline-block; margin: 0; max-height: 3.5cm; }}
             
-            .brasao-centralizado { 
+            .brasao-centralizado {{ 
                 justify-content: center; align-items: center; 
                 text-align: center; 
-            }
-            .brasao-esquerda { 
+            }}
+            .brasao-esquerda {{ 
                 justify-content: center; align-items: flex-start; 
                 text-align: left;
-            }
-            .brasao-direita { 
+            }}
+            .brasao-direita {{ 
                 justify-content: center; align-items: flex-end; 
                 text-align: right;
-            }
-            .pagina.capa > div:first-child {
+            }}
+            .pagina.capa > div:first-child {{
                 align-self: stretch; 
-            }
-            .pagina.pagina-em-branco::after {
+            }}
+            .pagina.pagina-em-branco::after {{
                 content: ""; /* Remove o número da página */
-            }
+            }}
             
-            /* --- INÍCIO: Estilos de Lista --- */
-            .pagina ol, .pagina ul {
+            /* --- Estilos de Lista --- */
+            .pagina ol, .pagina ul {{
                 text-align: justify;
-                margin-left: 1.25cm; /* Recuo padrão */
-                padding-left: 1.5em; /* Espaço para o marcador */
+                margin-left: 1.25cm; 
+                padding-left: 1.5em; 
                 margin-top: 6px;
                 margin-bottom: 6px;
-            }
+            }}
             
-            /* Tipo: Híbrida (ABNT) */
-            ol.lista-abnt-nivel-1 { list-style-type: none; counter-reset: item; }
-            ol.lista-abnt-nivel-2 { list-style-type: none; counter-reset: item2; }
-            ol.lista-abnt-nivel-3 { list-style-type: none; counter-reset: item3; }
-            ol.lista-abnt-nivel-4 { list-style-type: disc; } /* Símbolo */
+            ol.lista-abnt-nivel-1 {{ list-style-type: none; counter-reset: item; }}
+            ol.lista-abnt-nivel-2 {{ list-style-type: none; counter-reset: item2; }}
+            ol.lista-abnt-nivel-3 {{ list-style-type: none; counter-reset: item3; }}
+            ol.lista-abnt-nivel-4 {{ list-style-type: disc; }}
             
-            ol.lista-abnt-nivel-1 > li { counter-increment: item; }
-            ol.lista-abnt-nivel-1 > li::marker { content: counter(item, lower-alpha) ") "; font-weight: normal; }
-            ol.lista-abnt-nivel-2 > li { counter-increment: item2; }
-            ol.lista-abnt-nivel-2 > li::marker { content: counter(item2, decimal) ") "; font-weight: normal; }
-            ol.lista-abnt-nivel-3 > li { counter-increment: item3; }
-            ol.lista-abnt-nivel-3 > li::marker { content: counter(item3, lower-roman) ") "; font-weight: normal; }
+            ol.lista-abnt-nivel-1 > li {{ counter-increment: item; }}
+            ol.lista-abnt-nivel-1 > li::marker {{ content: counter(item, lower-alpha) ") "; font-weight: normal; }}
+            ol.lista-abnt-nivel-2 > li {{ counter-increment: item2; }}
+            ol.lista-abnt-nivel-2 > li::marker {{ content: counter(item2, decimal) ") "; font-weight: normal; }}
+            ol.lista-abnt-nivel-3 > li {{ counter-increment: item3; }}
+            ol.lista-abnt-nivel-3 > li::marker {{ content: counter(item3, lower-roman) ") "; font-weight: normal; }}
 
-            /* Tipo: Numérica (Seção) */
-            ol.lista-numerica { list-style-type: none; padding-left: 0.5em; margin-left: 0; }
-            ol.lista-numerica li { margin-left: 1.25cm; }
-            span.lista-numero-prefixo { margin-right: 0.5em; }
+            ol.lista-numerica {{ list-style-type: none; padding-left: 0.5em; margin-left: 0; }}
+            ol.lista-numerica li {{ margin-left: 1.25cm; }}
+            span.lista-numero-prefixo {{ margin-right: 0.5em; }}
 
-            /* Tipo: Alfabética */
-            ol.lista-alfabetica { list-style-type: upper-alpha; }
-            
-            /* Tipo: Símbolos */
-            ul.lista-simbolos { list-style-type: disc; }
-            /* --- FIM: Estilos de Lista --- */
+            ol.lista-alfabetica {{ list-style-type: upper-alpha; }}
+            ul.lista-simbolos {{ list-style-type: disc; }}
             
         </style>
         """
         
+        # --- Geração do Conteúdo (Mantida idêntica) ---
         if self.is_artigo:
             self.classe_pagina_atual = 'pagina'
             self.conteudo_pagina_atual = [self.classe_pagina_atual]
@@ -572,7 +659,8 @@ class GeradorHTMLPreview:
             self._adicionar_elemento_bloco(ref_html, altura_ref)
         self._nova_pagina()
 
-        return f"<!DOCTYPE html><html><head><meta charset='UTF-8'>{html_style}</head><body>{''.join(self.paginas_html)}</body></html>"
+        # Adiciona o JS no final do HTML
+        return f"<!DOCTYPE html><html><head><meta charset='UTF-8'>{html_style}</head><body>{''.join(self.paginas_html)}{js_scrollbar_fix}</body></html>"
 
     def _renderizar_cabecalho_capa_html(self, cfg):
         posicao = cfg.posicao_brasao

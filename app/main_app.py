@@ -172,19 +172,17 @@ class PreviewWorker(QObject):
     """Trabalhador para gerar HTML em uma thread separada."""
     finished = Signal(str) # Emite o HTML (str) quando termina
 
-    @Slot(object)
-    def run_generation(self, documento_copiado):
-        """Executa a tarefa pesada (geração de HTML)."""
+    # MODIFICADO: Recebe o zoom_factor
+    @Slot(object, bool, float)
+    def run_generation(self, documento_copiado, is_dark, zoom_factor):
         try:
-            # 'documento_copiado' é uma deepcopy do self.documento
             gerador = GeradorHTMLPreview(documento_copiado)
-            html_content = gerador.gerar_html()
+            # Passa o zoom para o gerador
+            html_content = gerador.gerar_html(is_dark_theme=is_dark, zoom_factor=zoom_factor)
             self.finished.emit(html_content)
         except Exception as e:
-            # Emite um sinal de erro
-            print(f"Erro na thread do worker de preview: {e}")
-            # Emite string vazia para sinalizar o fim
-            self.finished.emit("") 
+            print(f"Erro worker: {e}")
+            self.finished.emit("")
 
 # --- FIM: Worker de Preview ---
 
@@ -193,7 +191,7 @@ class ABNTHelperApp(QWidget):
     
     # --- INÍCIO: Adicionar Signal para a thread ---
     # Signal para enviar o objeto 'documento' (copiado) para o worker
-    request_preview_update = Signal(object) 
+    request_preview_update = Signal(object, bool, float) 
     # --- FIM: Adicionar Signal ---
     
     def __init__(self):
@@ -238,6 +236,10 @@ class ABNTHelperApp(QWidget):
         self.is_pagination_bar_visible = self.config['ui_settings'].get('pagination_bar_visible', True)
 
         self.BASE_ZOOM_FACTOR = 0.75
+        # --- ALTERAÇÃO: Limites de Zoom ---
+        self.MIN_ZOOM = 0.30  # 30% (Mínimo)
+        self.MAX_ZOOM = 1.00  # 150% (Máximo - impede que fique gigante)
+        # ----------------------------------
         initial_editor_width = 800
         initial_preview_width = 600
         total_initial_width = initial_editor_width + initial_preview_width
@@ -293,9 +295,8 @@ class ABNTHelperApp(QWidget):
         self.is_dark_theme = not self.is_dark_theme
         theme = "dark" if self.is_dark_theme else "light"
         
-        # --- MUDANÇA: Atualiza ícones ANTES de aplicar o tema ---
+        # Atualiza ícones (e agora bordas também)
         self._atualizar_icones_do_tema(self.is_dark_theme)
-        # --- FIM DA MUDANÇA ---
         
         qss = qdarktheme.load_stylesheet(theme)
         qss += stylesheet.get_style_sheet() 
@@ -304,6 +305,9 @@ class ABNTHelperApp(QWidget):
         
         self.config['ui_settings']['theme'] = theme
         gerenciador_config.salvar_config(self.config)
+
+        # --- CORREÇÃO 2: Força a atualização do HTML para aplicar a nova Scrollbar ---
+        self._atualizar_preview()
 
     def _atualizar_icones_do_tema(self, is_dark):
         """
@@ -376,6 +380,25 @@ class ABNTHelperApp(QWidget):
         if hasattr(self, 'btn_pag_anterior') and hasattr(self, 'btn_pag_proximo'):
             self.btn_pag_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-left{suffix}.png")))
             self.btn_pag_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-right{suffix}.png")))
+        
+        # --- CORREÇÃO 1: Atualiza a borda da barra de paginação ---
+        if hasattr(self, 'paginacao_toolbar'):
+            # Se escuro, borda quase preta (#333). Se claro, cinza suave (#CCC).
+            border_color = "#333333" if is_dark else "#CCCCCC"
+            self.paginacao_toolbar.setStyleSheet(f"border-top: 1px solid {border_color};")
+            
+        # --- Atualização de Cor do Texto da Busca (Código da resposta anterior) ---
+        if hasattr(self, 'lbl_contagem_busca'):
+            texto_atual = self.lbl_contagem_busca.text()
+            if texto_atual == "0/0":
+                cor = "#ff6b6b" if is_dark else "red"
+                self.lbl_contagem_busca.setStyleSheet(f"color: {cor}; font-weight: bold;")
+            elif texto_atual:
+                cor = "white" if is_dark else "#333"
+                self.lbl_contagem_busca.setStyleSheet(f"color: {cor}; font-weight: bold;")
+            else:
+                cor = "white" if is_dark else "#666"
+                self.lbl_contagem_busca.setStyleSheet(f"color: {cor}; font-size: 11px;")
 
     def _build_ui(self):
         menu_bar = QMenuBar(self)
@@ -654,29 +677,29 @@ class ABNTHelperApp(QWidget):
             splitter.addWidget(self.tabs)
             splitter.addWidget(self.preview_container)
             
-            # Define sua proporção personalizada
+            # Define proporção inicial
             splitter.setSizes([1000, 400]) 
             
             splitter.splitterMoved.connect(self._on_splitter_moved)
             
-            # --- INÍCIO DA CORREÇÃO (Zoom Inicial) ---
-            # Copia a lógica de zoom aqui para ser executada UMA VEZ no início.
+            # --- Lógica de Zoom Inicial com Limite ---
             sizes = splitter.sizes()
             if len(sizes) == 2 and sum(sizes) > 0 and self.NEUTRAL_PREVIEW_RATIO > 0:
                 total_width = sum(sizes)
                 current_preview_width = sizes[1]
-                
                 if current_preview_width > 0:
                     current_ratio = current_preview_width / total_width
                     ratio_change = current_ratio / self.NEUTRAL_PREVIEW_RATIO
-                    new_zoom = self.BASE_ZOOM_FACTOR * ratio_change
-                    new_zoom = max(0.2, min(new_zoom, 3.0)) 
-                    self.preview_display.setZoomFactor(new_zoom)
-            # --- FIM DA CORREÇÃO (Zoom Inicial) ---
+                    new_zoom_bruto = self.BASE_ZOOM_FACTOR * ratio_change
+                    
+                    # --- AQUI: FORÇA O LIMITE ---
+                    self._aplicar_zoom_seguro(new_zoom_bruto)
+                    # ----------------------------
             
             self.main_content_widget = splitter
             self.preview_container.show()
         else:
+            # Modo Aba
             index_preview = self.tabs.indexOf(self.preview_container)
             if index_preview == -1:
                 self.tabs.addTab(self.preview_container, "Pré-Visualização")
@@ -721,7 +744,7 @@ class ABNTHelperApp(QWidget):
     def _criar_painel_preview(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0) 
 
         # --- 1. BARRA DE BUSCA (Topo) ---
@@ -731,19 +754,16 @@ class ABNTHelperApp(QWidget):
         
         self.busca_input = QLineEdit()
         self.busca_input.setPlaceholderText("Buscar na pré-visualização...")
-        
-        # --- ALTERAÇÃO: Busca instantânea ao digitar ---
+        # Busca instantânea ao digitar
         self.busca_input.textChanged.connect(self._on_texto_busca_alterado)
-        # -----------------------------------------------
 
         self.lbl_contagem_busca = QLabel("")
         self.lbl_contagem_busca.setFixedWidth(60)
         self.lbl_contagem_busca.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # --- ALTERAÇÃO AQUI: Cor dinâmica inicial ---
+        # Cor inicial do texto da busca baseada no tema
         cor_inicial = "white" if self.is_dark_theme else "#666"
         self.lbl_contagem_busca.setStyleSheet(f"color: {cor_inicial}; font-size: 11px;")
-        # --------------------------------------------
         
         # Botões de Busca (Clean)
         self.btn_buscar_anterior = QPushButton()
@@ -778,16 +798,20 @@ class ABNTHelperApp(QWidget):
         layout.addWidget(self.busca_toolbar)
         self.busca_toolbar.setVisible(self.is_search_bar_visible)
         
-        # --- 2. ÁREA DE VISUALIZAÇÃO ---
+        # --- 2. ÁREA DE VISUALIZAÇÃO (QWebEngineView) ---
         self.preview_display = QWebEngineView()
+        
         self.preview_display.setHtml("<html><body><h1>Pré-Visualização</h1><p>A pré-visualização será atualizada aqui.</p></body></html>")
         self.preview_display.setZoomFactor(self.BASE_ZOOM_FACTOR)
         
         layout.addWidget(self.preview_display, 1) 
 
-        # --- 3. BARRA DE PAGINAÇÃO ---
+        # --- 3. BARRA DE PAGINAÇÃO (Rodapé) ---
         self.paginacao_toolbar = QWidget()
-        self.paginacao_toolbar.setStyleSheet("border-top: 1px solid #CCCCCC;") 
+        
+        # Define a cor da borda superior inicial baseada no tema
+        border_color_inicial = "#333333" if self.is_dark_theme else "#CCCCCC"
+        self.paginacao_toolbar.setStyleSheet(f"border-top: 1px solid {border_color_inicial};")
         
         pag_layout = QHBoxLayout(self.paginacao_toolbar)
         pag_layout.setContentsMargins(5, 2, 5, 2)
@@ -834,13 +858,15 @@ class ABNTHelperApp(QWidget):
         pag_layout.addStretch() 
         pag_layout.addWidget(self.btn_fechar_paginacao) 
         
-        # Ícones iniciais
+        # Carregamento inicial dos ícones (Search + Pagination)
         suffix = "-white" if self.is_dark_theme else ""
         try:
+            # Ícones Busca
             self.btn_buscar_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"previous{suffix}.png")))
             self.btn_buscar_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"next{suffix}.png")))
             self.btn_fechar_busca.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
             
+            # Ícones Paginação
             self.btn_pag_anterior.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-left{suffix}.png")))
             self.btn_pag_proximo.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"arrow-circle-right{suffix}.png")))
             self.btn_fechar_paginacao.setIcon(QtGui.QIcon(os.path.join(self.ICON_PATH, f"x{suffix}.png")))
@@ -856,16 +882,19 @@ class ABNTHelperApp(QWidget):
         layout.addWidget(self.btn_atualizar_preview)
         
         # --- 5. CONEXÕES ---
+        # Busca
         self.btn_buscar_proximo.clicked.connect(self._buscar_proximo_preview)
         self.btn_buscar_anterior.clicked.connect(self._buscar_anterior_preview)
         self.busca_input.returnPressed.connect(self._buscar_proximo_preview)
         self.btn_fechar_busca.clicked.connect(self._alternar_barra_busca)
         
+        # WebEngine Signals
         self.preview_display.page().findTextFinished.connect(self._on_resultado_busca_recebido)
         self.preview_display.loadFinished.connect(self._restaurar_scroll_preview)
         self.preview_display.loadFinished.connect(self._injetar_js_paginacao)
         self.preview_display.titleChanged.connect(self._on_titulo_web_changed)
 
+        # Paginação
         self.btn_pag_anterior.clicked.connect(self._ir_para_pagina_anterior)
         self.btn_pag_proximo.clicked.connect(self._ir_para_proxima_pagina)
         self.spin_pagina.valueChanged.connect(self._ir_para_pagina_especifica)
@@ -875,37 +904,30 @@ class ABNTHelperApp(QWidget):
 
     @QtCore.Slot(int, int)
     def _on_splitter_moved(self, pos, index):
-        """Ajusta o zoom da preview quando o splitter é movido."""
+        """Ajusta o zoom enquanto arrasta, respeitando o limite."""
         if self.modo_preview != "lado_a_lado" or not isinstance(self.main_content_widget, QSplitter):
             return
         
         splitter = self.main_content_widget
         sizes = splitter.sizes()
         
-        if len(sizes) != 2:
-            return
-            
+        if len(sizes) != 2: return
         total_width = sum(sizes)
-        if total_width == 0:
-            return
-            
+        if total_width == 0: return
         current_preview_width = sizes[1]
-        
-        if current_preview_width <= 0:
-            return
-            
+        if current_preview_width <= 0: return
         current_ratio = current_preview_width / total_width
         
-        if self.NEUTRAL_PREVIEW_RATIO == 0:
-            return
+        if self.NEUTRAL_PREVIEW_RATIO == 0: return
             
         ratio_change = current_ratio / self.NEUTRAL_PREVIEW_RATIO
+        new_zoom_bruto = self.BASE_ZOOM_FACTOR * ratio_change
         
-        new_zoom = self.BASE_ZOOM_FACTOR * ratio_change
+        # --- AQUI: FORÇA O LIMITE ---
+        self._aplicar_zoom_seguro(new_zoom_bruto)
+        # ----------------------------
         
-        new_zoom = max(0.2, min(new_zoom, 3.0)) 
-        
-        self.preview_display.setZoomFactor(new_zoom)
+        self.preview_update_timer.start()
 
     @QtCore.Slot()
     def _alternar_barra_busca(self):
@@ -958,8 +980,7 @@ class ABNTHelperApp(QWidget):
             
     @QtCore.Slot()
     def _restaurar_scroll_preview(self):
-        # --- INÍCIO DA CORREÇÃO (Re-aplicar Zoom após carregar HTML) ---
-        # Garante que o zoom correto seja aplicado toda vez que o HTML é recarregado.
+        """Restaura o scroll e REAPLICA o zoom com limites após carregar o HTML."""
         
         # Apenas executa a lógica de zoom se estivermos no modo lado-a-lado
         if self.modo_preview == "lado_a_lado" and isinstance(self.main_content_widget, QSplitter):
@@ -973,12 +994,15 @@ class ABNTHelperApp(QWidget):
                 if current_preview_width > 0:
                     current_ratio = current_preview_width / total_width
                     ratio_change = current_ratio / self.NEUTRAL_PREVIEW_RATIO
-                    new_zoom = self.BASE_ZOOM_FACTOR * ratio_change
-                    new_zoom = max(0.2, min(new_zoom, 3.0)) 
-                    self.preview_display.setZoomFactor(new_zoom)
-        # --- FIM DA CORREÇÃO ---
+                    
+                    # Calcula o zoom que a tela "gostaria" de ter
+                    new_zoom_bruto = self.BASE_ZOOM_FACTOR * ratio_change
+                    
+                    # --- AQUI: FORÇA O LIMITE ---
+                    self._aplicar_zoom_seguro(new_zoom_bruto)
+                    # ----------------------------
         
-        # Restaura a posição do scroll (como antes)
+        # Restaura a posição do scroll
         self.preview_display.page().runJavaScript(f"window.scrollTo(0, {self.scroll_posicao});")
     
     @QtCore.Slot(str)
@@ -1002,45 +1026,32 @@ class ABNTHelperApp(QWidget):
     # --- INÍCIO: Método _atualizar_preview (Refatorado para Thread) ---
     @QtCore.Slot()
     def _atualizar_preview(self):
-        """
-        Verifica a fila e despacha a geração da preview para uma thread
-        separada, evitando travamento da UI.
-        """
-        # Se o worker estiver ocupado, apenas marque que queremos uma atualização
-        # e saia. O worker chamará esta função quando terminar.
         if self.is_preview_worker_busy:
             self.pending_preview_update = True
-            print("Preview worker ocupado. Adicionando à fila.")
             return
 
-        # Se o worker estiver livre, inicie o trabalho.
-        print("Iniciando atualização da preview em segundo plano...")
         self.is_preview_worker_busy = True
         self.pending_preview_update = False
 
-        # 1. Salva o scroll (na thread principal)
         if self.modo_preview == "lado_a_lado":
             self._salvar_scroll_preview()
         
-        # 2. Sincroniza os dados (na thread principal)
-        # Garante que o documento tenha os dados mais recentes do editor e da UI
         self.aba_conteudo.sincronizar_conteudo_pendente()
         self._sincronizar_modelo_com_ui()
         
-        # 3. Cria uma cópia segura dos dados para a thread
         try:
-            # Deepcopy é essencial para evitar que a thread acesse
-            # o mesmo objeto que a UI está modificando.
             documento_copia = copy.deepcopy(self.documento)
         except Exception as e:
-            print(f"Erro ao copiar documento para a thread: {e}")
-            self.is_preview_worker_busy = False # Libera a trava se a cópia falhar
+            self.is_preview_worker_busy = False
             return
 
-        # 4. Envia a cópia para a thread de trabalho emitindo o sinal
-        self.request_preview_update.emit(documento_copia)
-    # --- FIM: Método _atualizar_preview ---
+        # --- NOVO: Captura o Zoom atual ---
+        current_zoom = self.preview_display.zoomFactor()
+        # Evita zoom zero ou negativo por segurança
+        if current_zoom <= 0.1: current_zoom = 1.0 
 
+        # Envia para o worker
+        self.request_preview_update.emit(documento_copia, self.is_dark_theme, current_zoom)
 
     # --- INÍCIO: Novo Slot para receber o resultado da Thread ---
     @QtCore.Slot(str)
@@ -1764,6 +1775,23 @@ class ABNTHelperApp(QWidget):
             # Dispara a busca usando a lógica existente.
             # O QWebEngine entende que se o texto mudou, é uma nova busca.
             self._buscar_preview()
+    
+    def _aplicar_zoom_seguro(self, valor_bruto):
+        """
+        Centraliza a aplicação de zoom.
+        Impede que o valor seja menor que MIN_ZOOM ou maior que MAX_ZOOM.
+        """
+        # Garante que self.MAX_ZOOM e self.MIN_ZOOM existam (fallback de segurança)
+        max_z = getattr(self, 'MAX_ZOOM', 1.5)
+        min_z = getattr(self, 'MIN_ZOOM', 0.3)
+        
+        # A Mágica: Corta tudo que passar do máximo ou for menor que o mínimo
+        zoom_final = max(min_z, min(valor_bruto, max_z))
+        
+        # Depuração (Opcional: veja no terminal se está travando em 1.0)
+        # print(f"Tentou: {valor_bruto:.2f} | Travou em: {zoom_final:.2f}")
+        
+        self.preview_display.setZoomFactor(zoom_final)
 
 
 if __name__ == '__main__':
@@ -1777,7 +1805,7 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
 
     # ----------------------------------------------------
-    # --- EXECUÇÃO DA CHECAGEM DE SEGURANÇA (AQUI É ONDE CRASHA) ---
+    # --- EXECUÇÃO DA CHECAGEM DE SEGURANÇA ---
     # ----------------------------------------------------
     run_hmac_security_check()
     # ----------------------------------------------------
