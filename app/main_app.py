@@ -74,7 +74,7 @@ from dialogs import DialogoRecuperacao
 # ----------------------------------------------------
 
 # 1. CONTROLE DE DEBUG: True = Pula a verificação do Launcher
-DISABLE_LAUNCHER_CHECK = True # <-- Mantenha True para DEBUG, use False para PRODUÇÃO
+DISABLE_LAUNCHER_CHECK = False # <-- Mantenha True para DEBUG, use False para PRODUÇÃO
 
 # 2. SEGREDO COMPARTILHADO: Deve ser idêntico ao do launcher
 DYNAMIC_SECRET_SALT = b"OWIYVQUXJ64IJETQPXT1UZZ16YBNI8" 

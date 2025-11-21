@@ -1,5 +1,6 @@
-# laucher.py
-# v2.2 - Implementado controle de versão (opcional/obrigatório)
+# launcher.py
+# v3.2 - Arquitetura Side-Loading (.bin externo + Extração segura) + Debug Button
+# Correção WinError 5 e Detecção de Binário Versionado
 
 import sys
 import os
@@ -8,11 +9,14 @@ import json
 import zipfile
 import shutil
 import tempfile
+import time
 from datetime import datetime
 import uuid 
 import platform 
+import re 
+import stat # Necessário para corrigir o erro de permissão
 
-#Imports para a checagem de segurança HMAC
+# Imports para a checagem de segurança HMAC
 import hmac 
 import hashlib
 from datetime import datetime, timezone
@@ -26,9 +30,11 @@ DYNAMIC_SECRET_SALT = b"OWIYVQUXJ64IJETQPXT1UZZ16YBNI8"
 try:
     from packaging import version
 except ImportError:
-    print("ERRO CRÍTICO: Biblioteca 'packaging' não encontrada.")
-    print("Execute: pip install packaging")
-    sys.exit(1)
+    # Fallback simples se packaging não existir
+    class version:
+        @staticmethod
+        def parse(v): return v
+    print("Aviso: 'packaging' não encontrado. Usando comparação simples.")
 # --------------------
 
 # --- Importações do Projeto ---
@@ -55,11 +61,208 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
-# --- 2. Definições Globais ---
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-APP_DIR = os.path.join(ROOT_DIR, "app")
-LAUNCHER_CONFIG_FILE = resource_path("launcher_config.json") 
+# ============================================================================
+# --- DEFINIÇÕES GLOBAIS E CAMINHOS (ARQUITETURA SIDE-LOADING) ---
+# ============================================================================
+
+# Se estiver compilado (exe), usa sys.argv[0] para pegar a pasta real onde o arquivo está.
+if "__compiled__" in globals():
+    # NUITKA: sys.argv[0] é o caminho do executável .exe original clicado
+    ROOT_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+elif getattr(sys, 'frozen', False):
+    # PyInstaller: sys.executable é o caminho do .exe
+    ROOT_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    # VS Code / Python Script
+    ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Pastas de Destino (Cofre)
+# Ex: C:\Users\Nome\AppData\Local\Formatheus\Core
+LOCAL_APP_DATA = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+BASE_EXTRACT_DIR = os.path.join(LOCAL_APP_DATA, "Formatheus")
+EXTRACT_DIR = os.path.join(BASE_EXTRACT_DIR, "Core")
+
+# --- EDIÇÃO 1: FORÇAR CRIAÇÃO DA PASTA AGORA ---
+# Isso garante que o launcher_config.json possa ser salvo imediatamente
+try:
+    os.makedirs(BASE_EXTRACT_DIR, exist_ok=True)
+except Exception as e:
+    print(f"[Launcher] Erro ao criar pasta de dados: {e}")
+# -----------------------------------------------
+
+# Onde está o executável real após a extração
+MAIN_APP_EXE = os.path.join(EXTRACT_DIR, "main_app.exe")
+
+LAUNCHER_CONFIG_FILE = os.path.join(BASE_EXTRACT_DIR, "launcher_config.json")
 CONTROLLER_EXE = os.path.join(ROOT_DIR, "controller.exe")
+
+# ============================================================================
+# --- FUNÇÕES AUXILIARES DE ARQUIVO ---
+# ============================================================================
+
+def remove_readonly(func, path, excinfo):
+    """
+    Callback para shutil.rmtree que força a remoção de arquivos Read-Only.
+    Isso corrige o [WinError 5] Acesso Negado.
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:
+        pass
+
+def delete_folder_robust(path, retries=5, delay=0.5):
+    """
+    Tenta deletar uma pasta repetidamente para evitar WinError 5 / Access Denied
+    causado por antivírus ou indexadores do Windows segurando o arquivo.
+    """
+    if not os.path.exists(path):
+        return True
+        
+    for i in range(retries):
+        try:
+            shutil.rmtree(path, onerror=remove_readonly)
+            return True
+        except OSError:
+            if i < retries - 1:
+                time.sleep(delay)
+            else:
+                print(f"[Launcher] Falha ao deletar {path} após {retries} tentativas.")
+                return False
+    return False
+
+def find_local_bin_and_version():
+    """Procura arquivos .bin na pasta do executável (ROOT_DIR)."""
+    melhor_arquivo = None
+    melhor_versao = "0.0.0"
+
+    if not os.path.exists(ROOT_DIR): return None, None
+
+    try:
+        arquivos = os.listdir(ROOT_DIR)
+    except Exception: return None, None
+
+    # Regex Flexível: Aceita 'app_v1.0.0.bin', 'app_v1.2.bin', etc.
+    padrao = re.compile(r"^app_v(.+)\.bin$", re.IGNORECASE)
+
+    candidatos = []
+    for arquivo in arquivos:
+        match = padrao.match(arquivo)
+        if match:
+            ver_str = match.group(1)
+            full_path = os.path.join(ROOT_DIR, arquivo)
+            candidatos.append((full_path, ver_str))
+            print(f"[Launcher] Encontrado candidato: {arquivo}")
+
+    # Pega a maior versão encontrada
+    for caminho, ver_str in candidatos:
+        try:
+            if version.parse(ver_str) > version.parse(melhor_versao):
+                melhor_versao = ver_str
+                melhor_arquivo = caminho
+        except:
+            pass # Ignora versões inválidas
+
+    return melhor_arquivo, melhor_versao
+
+# ============================================================================
+# --- LÓGICA DE EXTRAÇÃO INTELIGENTE ---
+# ============================================================================
+
+def ensure_core_is_ready():
+    """
+    Gerencia a extração. Prioriza o arquivo local app_vX.bin.
+    Retorna uma tupla: (is_ready: bool, was_just_extracted: bool)
+    """
+    local_bin_path, local_bin_version = find_local_bin_and_version()
+    
+    # Config atual
+    config = get_launcher_config()
+    installed_version = config.get("app_version", "0.0.0")
+    
+    needs_extraction = False
+
+    # 1. Verifica se deve extrair
+    if local_bin_path:
+        # Se não tem nada instalado
+        if not os.path.exists(EXTRACT_DIR):
+            print(f"[Launcher] Instalação limpa detectada via local bin (v{local_bin_version}).")
+            needs_extraction = True
+        
+        # Se o bin local é mais novo que o instalado
+        elif version.parse(local_bin_version) > version.parse(installed_version):
+            print(f"[Launcher] Atualização Local: Binário (v{local_bin_version}) > Instalado (v{installed_version}).")
+            needs_extraction = True
+            
+        # Opcional: Se arquivo foi modificado (re-build dev), descomente abaixo
+        # elif os.path.getmtime(local_bin_path) > os.path.getmtime(EXTRACT_DIR):
+        #    needs_extraction = True
+
+    if needs_extraction and local_bin_path:
+        try:
+            print(f"[Launcher] Iniciando extração de '{os.path.basename(local_bin_path)}'...")
+            
+            # Limpeza Robusta (Resolve WinError 5)
+            temp_trash = EXTRACT_DIR + "_trash_" + str(uuid.uuid4())[:8]
+            
+            # Tenta mover a pasta atual para o lixo primeiro (Atomic move é mais seguro que delete)
+            if os.path.exists(EXTRACT_DIR):
+                try:
+                    os.rename(EXTRACT_DIR, temp_trash)
+                except OSError:
+                    # Se não der pra mover, tenta deletar direto
+                    pass
+
+            # Limpa o lixo antigo se existir
+            if os.path.exists(temp_trash):
+                delete_folder_robust(temp_trash)
+            
+            # Garante que o local de destino está limpo
+            delete_folder_robust(EXTRACT_DIR)
+            
+            time.sleep(0.2) # Breve pausa para o OS liberar handles
+            os.makedirs(EXTRACT_DIR, exist_ok=True)
+            
+            with zipfile.ZipFile(local_bin_path, 'r') as z:
+                z.extractall(EXTRACT_DIR)
+            
+            os.utime(EXTRACT_DIR, None)
+            
+            # Atualiza config
+            config["app_version"] = local_bin_version
+            save_launcher_config(config)
+            
+            print("[Launcher] Extração local concluída com sucesso.")
+            
+            # Tenta limpar o lixo restante em background (não falha se não conseguir)
+            if os.path.exists(temp_trash):
+                try:
+                    shutil.rmtree(temp_trash, onerror=remove_readonly)
+                except: pass
+
+            return True, True # (Pronto, Acabou de Extrair)
+
+        except Exception as e:
+            print(f"[Launcher] FALHA FATAL na extração: {e}")
+            # Se falhou, verifica se o app antigo ainda funciona
+            return os.path.exists(MAIN_APP_EXE), False
+
+    # Se não precisou extrair (ou não achou bin), verifica se o app já existe
+    if os.path.exists(MAIN_APP_EXE):
+        return True, False
+    
+    # Não existe app e não existe bin local
+    return False, False
+
+
+def get_app_launch_command():
+    """Retorna o comando para iniciar o app extraído no AppData."""
+    if os.path.exists(MAIN_APP_EXE):
+        return [MAIN_APP_EXE]
+    
+    print(f"[Launcher] Erro: Executável principal não encontrado em: {MAIN_APP_EXE}")
+    return None
+
 
 # --- 3. Função de Carregamento da UI ---
 def carregar_modulos_ui():
@@ -69,7 +272,7 @@ def carregar_modulos_ui():
                                      QLineEdit, QDialog, QListWidget, 
                                      QDialogButtonBox, QListWidgetItem,
                                      QProgressBar, QPlainTextEdit, QSpacerItem,
-                                     QSizePolicy) # <-- Vários adicionados
+                                     QSizePolicy) 
         from PySide6.QtGui import QIcon, QPixmap, QFont
         from PySide6.QtCore import Qt, Slot, QObject, QThread, Signal, QDate 
     except ImportError:
@@ -123,12 +326,9 @@ def get_local_license_key(config):
 def get_hostname():
     return platform.node()
 
-# ---
-# --- ⬇️⬇️ FUNÇÃO DE CHECK_FOR_UPDATE MODIFICADA ⬇️⬇️
-# ---
 def check_for_update_firebase(current_app_version: str):
     """
-    Chama a nova função 'check_for_update' do Firebase.
+    Chama a função 'check_for_update' do Firebase.
     """
     print(f"[Launcher] Verificando servidor com versão local: {current_app_version}")
     try:
@@ -145,37 +345,17 @@ def check_for_update_firebase(current_app_version: str):
     except Exception as e:
         print(f"[Launcher] Falha crítica ao verificar atualização: {e}")
         return False, None
-# ---
-# --- ⬆️⬆️ FIM DA MODIFICAÇÃO ⬆️⬆️
-# ---
-
-def get_app_launch_command():
-    if not os.path.exists(APP_DIR):
-        print("[Launcher] Erro: Pasta /app não encontrada. Não é possível iniciar.")
-        return None
-    
-    main_app_path = None
-    if getattr(sys, 'frozen', False):
-        main_app_path = os.path.join(APP_DIR, "main_app.exe")
-    else:
-        main_app_path = os.path.join(APP_DIR, "main_app.py")
-
-    if not os.path.exists(main_app_path):
-         print(f"[Launcher] Erro: Arquivo principal '{main_app_path}' não encontrado.")
-         return None
-         
-    if getattr(sys, 'frozen', False):
-        return [main_app_path]
-    else:
-        return [sys.executable, main_app_path]
 
 # --- 5. Ponto de Entrada Principal ---
 
 def main():
     """Função principal do Launcher."""
-    
-    # --- FASE 1: Verificação de Licença (Offline e Online) ---
     print("[Launcher] Iniciando...")
+
+    # --- PASSO 0: PREPARAR O CORE (SIDE-LOADING) ---
+    # Verifica e extrai o binário ANTES de qualquer coisa
+    core_is_ready, extracted_locally = ensure_core_is_ready()
+
     launcher_config = get_launcher_config()
     device_id = get_or_create_device_id(launcher_config)
     
@@ -183,7 +363,13 @@ def main():
     ui_mode = "activate"
     initial_response = None
     error_message = ""
+
+    # Se o core não estiver pronto e não houver binário, erro fatal (a menos que vá instalar)
+    if not core_is_ready:
+        # Se não tem core, assumimos que pode ser uma instalação limpa que precisa baixar
+        pass 
     
+    # --- FASE 1: Verificação de Licença (Offline e Online) ---
     lease_data = lease_manager.read_lease(device_id)
 
     if lease_data:
@@ -193,7 +379,7 @@ def main():
         if lease_status == "ok":
             print("[Launcher] Lease offline VÁLIDO.")
             is_activated = True
-            ui_mode = "check_update" # <-- MUDOU
+            ui_mode = "check_update"
             
         elif lease_status == "expired":
             error_message = f"Sua licença expirou em {lease_data.get('real_expiry')}.\nPor favor, renove seu plano para continuar."
@@ -227,7 +413,7 @@ def main():
                 print("[Launcher] Verificação online OK.")
                 lease_manager.write_lease(response['real_expiry'], device_id)
                 is_activated = True
-                ui_mode = "check_update" # <-- MUDOU
+                ui_mode = "check_update"
             
             elif status == "limit_reached":
                 is_activated = False
@@ -239,84 +425,101 @@ def main():
                 ui_mode = "show_error"
                 error_message = f"Sua licença não pôde ser validada:\n\n{response.get('message')}"
 
-    # ---
-    # --- ⬇️⬇️ FASE 3 MODIFICADA ⬇️⬇️
-    # ---
-    
-    # --- FASE 3: Verificação de Atualização (Apenas se ativado) ---
+    # --- FASE 3: Verificação de Atualização ---
     
     update_info = None 
     
     if ui_mode == "check_update":
-        app_version = launcher_config.get("app_version", "0.0.0")
         
-        update_available, latest_info = check_for_update_firebase(app_version)
-        
-        # --- PREPARAÇÃO DO TOKEN DE SEGURANÇA (CENTRALIZADO) ---
-        # Gera o token uma vez para ser usado em qualquer um dos cenários abaixo
-        now_utc = datetime.now(timezone.utc).replace(microsecond=0)
-        timestamp_str = now_utc.isoformat()
-        token = hmac.new(DYNAMIC_SECRET_SALT, timestamp_str.encode('utf-8'), hashlib.sha256).hexdigest()
-        
-        # CRIA UM DICIONÁRIO DE AMBIENTE LIMPO
-        env_dict = os.environ.copy()
-        env_dict["FORMATHEUS_TOKEN"] = token
-        env_dict["FORMATHEUS_TIMESTAMP"] = timestamp_str
-        # -------------------------------------------------------
-        
-        # Fallback para o caso de falha de conexão com o servidor de update
-        if not latest_info:
+        # --- MODIFICAÇÃO: Se extraiu localmente, PULA o Firebase ---
+        if extracted_locally:
+            print("[Launcher] Instalação local detectada. Iniciando direto sem verificar online.")
+            
+            # Gera o token necessário para o app abrir
+            now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+            timestamp_str = now_utc.isoformat()
+            token = hmac.new(DYNAMIC_SECRET_SALT, timestamp_str.encode('utf-8'), hashlib.sha256).hexdigest()
+            
+            env_dict = os.environ.copy()
+            env_dict["FORMATHEUS_TOKEN"] = token
+            env_dict["FORMATHEUS_TIMESTAMP"] = timestamp_str
+            
             launch_command = get_app_launch_command()
             if launch_command:
-                print("[Launcher] Falha ao checar servidor. Iniciando versão local...")
-                subprocess.Popen(launch_command, env=env_dict) # <-- USA env_dict
+                subprocess.Popen(launch_command, env=env_dict)
                 sys.exit(0)
             else:
+                # Erro estranho: Extraiu mas não achou o exe
+                print("[Launcher] Erro: Binário extraído, mas main_app.exe não encontrado.")
                 ui_mode = "show_error"
-                error_message = "Não foi possível contatar o servidor de atualização e o app não está instalado localmente."
-            
+                error_message = "A instalação local falhou: Executável não encontrado após extração."
+
         else:
-            # Servidor respondeu!
-            update_info = latest_info
+            # --- CAMINHO PADRÃO: Verifica Firebase ---
+            app_version = launcher_config.get("app_version", "0.0.0")
             
-            launch_command = get_app_launch_command()
-            app_exists_locally = launch_command is not None
+            update_available, latest_info = check_for_update_firebase(app_version)
             
-            # 1. App não existe localmente (força download/instalação)
-            if not app_exists_locally:
-                print("[Launcher] App não encontrado. Forçando instalação/download.")
-                ui_mode = "install"
-                
-            # 2. App existe E há uma atualização disponível
-            elif app_exists_locally and version.parse(app_version) < version.parse(update_info.get("version", "0.0.0")):
-                print(f"[Launcher] Atualização encontrada: {app_version} -> {update_info.get('version')}")
-                ui_mode = "update"
+            # --- PREPARAÇÃO DO TOKEN DE SEGURANÇA ---
+            # Geramos o token aqui também para caso o app esteja atualizado e vá iniciar
+            now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+            timestamp_str = now_utc.isoformat()
+            token = hmac.new(DYNAMIC_SECRET_SALT, timestamp_str.encode('utf-8'), hashlib.sha256).hexdigest()
             
-            # 3. Cenário do Usuário (Instalador Full): App existe, mas a versão não foi registrada ("0.0.0")
-            elif app_exists_locally and app_version == "0.0.0":
-                # Assumimos que a binária instalada é a última versão do servidor.
-                app_version_simulated = update_info.get("version", "1.0.0")
-                launcher_config["app_version"] = app_version_simulated
-                save_launcher_config(launcher_config)
-
-                print(f"[Launcher] Pacote de instalação detectado. Registrando versão {app_version_simulated} e iniciando.")
-                subprocess.Popen(launch_command, env=env_dict) # <-- USA env_dict
-                sys.exit(0)
-                
-            # 4. App existe, versão está OK. Lança.
+            env_dict = os.environ.copy()
+            env_dict["FORMATHEUS_TOKEN"] = token
+            env_dict["FORMATHEUS_TIMESTAMP"] = timestamp_str
+            # ----------------------------------------
+            
+            # Fallback para falha de conexão (Servidor offline ou sem internet)
+            if not latest_info:
+                launch_command = get_app_launch_command()
+                # Se temos o app instalado (core_is_ready), iniciamos ele mesmo sem checar update
+                if launch_command and core_is_ready:
+                    print("[Launcher] Falha ao checar servidor. Iniciando versão instalada...")
+                    subprocess.Popen(launch_command, env=env_dict)
+                    sys.exit(0)
+                else:
+                    ui_mode = "show_error"
+                    error_message = "Não foi possível contatar o servidor e o aplicativo não está instalado."
+            
             else:
-                print("[Launcher] Licença OK. App atualizado. Iniciando main_app...")
-                subprocess.Popen(launch_command, env=env_dict) # <-- USA env_dict
-                sys.exit(0)
+                # Servidor respondeu com sucesso
+                update_info = latest_info
                 
-        # Se o fluxo não foi interrompido com sys.exit(0), define update_info para a UI
-        update_info = latest_info
+                launch_command = get_app_launch_command()
+                app_exists_locally = launch_command is not None and core_is_ready
+                
+                remote_version = update_info.get("version", "0.0.0")
+                
+                # 1. App não existe (instalação limpa via internet)
+                if not app_exists_locally:
+                    print("[Launcher] App não encontrado. Forçando instalação via download.")
+                    ui_mode = "install"
+                
+                # 2. Atualização disponível (Servidor > Local)
+                elif app_exists_locally and version.parse(app_version) < version.parse(remote_version):
+                    print(f"[Launcher] Atualização encontrada: {app_version} -> {remote_version}")
+                    ui_mode = "update"
+                
+                # 3. Primeira execução pós-instalação manual antiga (fix de versão 0.0.0)
+                elif app_exists_locally and app_version == "0.0.0":
+                    print(f"[Launcher] Registrando versão inicial {remote_version} e iniciando.")
+                    launcher_config["app_version"] = remote_version
+                    save_launcher_config(launcher_config)
+                    subprocess.Popen(launch_command, env=env_dict)
+                    sys.exit(0)
+                    
+                # 4. Tudo atualizado
+                else:
+                    print("[Launcher] App atualizado. Iniciando...")
+                    subprocess.Popen(launch_command, env=env_dict)
+                    sys.exit(0)
+                    
+                # Guarda as infos para usar na UI (notas da versão, etc)
+                update_info = latest_info
 
-    # ---
-    # --- ⬆️⬆️ FIM DA FASE 3 MODIFICADA ⬆️⬆️
-    # ---
-
-    # --- FASE 4: Carregar a UI (Se necessário) ---
+    # --- FASE 4: Carregar a UI ---
     print(f"[Launcher] Ação de UI necessária: {ui_mode}")
 
     (QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, 
@@ -335,7 +538,6 @@ def main():
         
     
     class DialogoDispositivos(QDialog):
-        # ... (Sem alterações) ...
         def __init__(self, device_list, parent=None):
             super().__init__(parent)
             self.setWindowTitle("Limite de Dispositivos Atingido")
@@ -370,17 +572,17 @@ def main():
             self.selected_device_id = selected_item.data(Qt.ItemDataRole.UserRole)
             self.accept()
     
-    # ---
-    # --- ⬇️⬇️ JANELA DO LAUNCHER MODIFICADA ⬇️⬇️
-    # ---
+    # --- JANELA DO LAUNCHER ---
     class LauncherWindow(QWidget):
         def __init__(self, is_dark_theme=False, ui_mode="activate", 
                      update_info=None, initial_response=None):
             super().__init__()
+
+            self.launch_pending = False
             
             self.is_dark = is_dark_theme
             self.ui_mode = ui_mode 
-            self.update_info = update_info # Agora contém { "version": "...", "release_notes": "...", "is_mandatory": ... }
+            self.update_info = update_info
             self.initial_response = initial_response 
             
             self.config = get_launcher_config()
@@ -397,7 +599,7 @@ def main():
                 self.setWindowIcon(QIcon(icon_path)) 
             except Exception: pass
             
-            self.setMinimumSize(450, 400) # <-- Aumentado para notas
+            self.setMinimumSize(450, 400)
             self._build_ui()
             
             if self.ui_mode == "replace_device":
@@ -415,11 +617,31 @@ def main():
                 layout = QVBoxLayout(self)
                 self.setLayout(layout)
             
+            # --- CABEÇALHO COM BOTÃO DE DEBUG ---
+            header_layout = QHBoxLayout()
+            
             title_label = QLabel("Formatheus")
             font = QFont("Segoe UI", 24)
             font.setBold(True)
             title_label.setFont(font)
-            title_label.setAlignment(Qt.AlignCenter)
+            
+            # Botão de Debug (Pasta) - Abre o local onde o .exe foi extraído
+            self.btn_debug = QPushButton("📂")
+            self.btn_debug.setToolTip("Abrir pasta de instalação (Debug)")
+            self.btn_debug.setFixedSize(30, 30)
+            self.btn_debug.setCursor(Qt.PointingHandCursor)
+            self.btn_debug.setStyleSheet("background: transparent; border: none; font-size: 16px;")
+            self.btn_debug.clicked.connect(self.open_debug_folder)
+            
+            # Só mostra se a pasta existe
+            if not os.path.exists(EXTRACT_DIR): 
+                self.btn_debug.setVisible(False)
+
+            header_layout.addStretch() 
+            header_layout.addWidget(title_label)
+            header_layout.addStretch() 
+            header_layout.addWidget(self.btn_debug)
+            # ------------------------------------
 
             self.status_label = QLabel("")
             self.status_label.setAlignment(Qt.AlignCenter)
@@ -428,7 +650,6 @@ def main():
             self.key_input.setPlaceholderText("Cole sua chave de licença (FMT-...)")
             self.key_input.setAlignment(Qt.AlignCenter)
             
-            # --- Widgets de Release (Notas de atualização) ---
             self.release_notes_label = QLabel("Notas da Versão:")
             self.release_notes_label.setVisible(False)
             self.release_notes_area = QPlainTextEdit()
@@ -440,11 +661,10 @@ def main():
             self.progress_bar.setTextVisible(True)
             self.progress_bar.setFormat("%p% - Baixando...")
 
-            # --- Layout dos Botões (para Pular/Atualizar) ---
             self.button_layout = QHBoxLayout()
             
             self.skip_btn = QPushButton("Pular e Iniciar")
-            self.skip_btn.setProperty("cssClass", "secondary") # (Requer .css)
+            self.skip_btn.setProperty("cssClass", "secondary")
             self.skip_btn.clicked.connect(self.launch_anyway)
             
             self.action_btn = QPushButton("")
@@ -454,17 +674,15 @@ def main():
             
             self.button_layout.addWidget(self.skip_btn)
             self.button_layout.addWidget(self.action_btn)
-            # --- Fim do Layout de Botões ---
             
             try:
                 self.action_btn.clicked.disconnect()
             except RuntimeError: pass
             self.action_btn.clicked.connect(self.on_action_clicked)
             
-            self.update_ui_for_mode() # Preenche os widgets
+            self.update_ui_for_mode() 
 
-            # Adiciona os widgets ao layout principal
-            layout.addWidget(title_label)
+            layout.addLayout(header_layout) # Usa o header modificado
             layout.addSpacing(10)
             layout.addWidget(self.status_label)
             layout.addSpacing(10)
@@ -475,11 +693,17 @@ def main():
             layout.addStretch(1)
             layout.addLayout(self.button_layout)
 
+        def open_debug_folder(self):
+            """Abre a pasta de instalação (AppData) no Explorer."""
+            try:
+                if os.path.exists(EXTRACT_DIR):
+                    os.startfile(EXTRACT_DIR)
+                else:
+                    QMessageBox.warning(self, "Aviso", "A pasta de instalação ainda não foi criada.")
+            except Exception as e:
+                print(f"Erro ao abrir pasta: {e}")
 
         def update_ui_for_mode(self):
-            """Atualiza os widgets visíveis baseado no self.ui_mode"""
-            
-            # Esconde tudo que é condicional
             self.key_input.setVisible(False)
             self.progress_bar.setVisible(False)
             self.release_notes_label.setVisible(False)
@@ -512,11 +736,11 @@ def main():
                 if is_mandatory:
                     self.status_label.setText(f"Atualização obrigatória (v{v}) disponível.")
                     self.action_btn.setText(f"ATUALIZAR AGORA (v{v})")
-                    self.skip_btn.setVisible(False) # Não pode pular
+                    self.skip_btn.setVisible(False)
                 else:
                     self.status_label.setText(f"Atualização opcional (v{v}) disponível.")
                     self.action_btn.setText(f"ATUALIZAR (v{v})")
-                    self.skip_btn.setVisible(True) # Pode pular
+                    self.skip_btn.setVisible(True)
                 
                 self.show_release_notes()
             
@@ -526,10 +750,9 @@ def main():
                 self.skip_btn.setVisible(False)
                 self.progress_bar.setVisible(True) 
                 self.progress_bar.setValue(0)
-                self.show_release_notes() # Continua mostrando
+                self.show_release_notes()
 
         def show_release_notes(self):
-            """Preenche e exibe a caixa de notas de atualização."""
             if self.update_info:
                 notes = self.update_info.get("release_notes", "Nenhuma nota disponível.")
                 if notes:
@@ -539,11 +762,7 @@ def main():
 
         @Slot()
         def launch_anyway(self):
-            """Função do botão 'Pular'."""
             print("[Launcher] Usuário optou por pular a atualização.")
-            # NÃO iniciamos o subprocesso aqui. 
-            # Apenas fechamos a janela. O bloco 'if' no final do script
-            # detectará que a janela fechou e iniciará o app com o Token seguro.
             self.close()
                 
         @Slot()
@@ -558,10 +777,9 @@ def main():
                 self.close() 
 
         def handle_activation(self):
-            # ... (Sem alterações) ...
             chave = self.key_input.text().strip().upper()
             if not chave:
-                QMessageBox.warning(self, "Erro", "Por favor, insira uma chave de licença.")
+                QMessageBox.warning(self, "Erro", "Insira a chave.")
                 return
 
             self.action_btn.setEnabled(False)
@@ -571,46 +789,78 @@ def main():
             payload = {
                 "license_key": chave,
                 "device_id": self.device_id,
-                "hostname": get_hostname()
+                "hostname": platform.node()
             }
+            
+            # 1. Ativa no servidor
             response = firebase_client.call_firebase_function("activate_device", payload)
-            status = response.get("status")
-
-            if status == "success":
-                # SUCESSO! Agora, precisamos checar a versão e instalar.
+            
+            if response.get("status") == "success":
+                # Salva licença e lease
                 self.license_key = chave
                 self.config["license_key"] = chave
-                save_launcher_config(self.config)
                 lease_manager.write_lease(response['real_expiry'], self.device_id)
                 
-                # Roda a verificação de atualização PÓS-ATIVAÇÃO
-                update_avail, latest_info = check_for_update_firebase("0.0.0")
+                # --- CORREÇÃO DE VERSÃO AQUI ---
+                
+                # 1. Recarrega a config do disco. 
+                # Motivo: O ensure_core_is_ready() rodou no início e salvou a versão do .bin no JSON.
+                # Precisamos ler esse valor atualizado.
+                self.config = get_launcher_config() 
+                versao_atual = self.config.get("app_version", "0.0.0")
+                
+                print(f"[Launcher] Versão local detectada pós-ativação: {versao_atual}")
+                
+                # 2. Verifica se o binário existe fisicamente (dupla checagem)
+                launch_cmd = get_app_launch_command()
+                is_installed = launch_cmd is not None
+                
+                if is_installed and versao_atual != "0.0.0":
+                    # CENÁRIO PERFEITO: Já extraímos o .bin no boot.
+                    # Não precisamos perguntar nada ao servidor agora.
+                    # Assumimos que o .bin local é o que o usuário quer usar.
+                    QMessageBox.information(self, "Sucesso", "Ativado! Iniciando versão local...")
+                    self.launch_pending = True
+                    self.close()
+                    return
+
+                # 3. Se NÃO estiver instalado ou for realmente 0.0.0 (sem bin local), 
+                # aí sim perguntamos ao servidor usando a versão atual (e não hardcoded)
+                save_launcher_config(self.config)
+                
+                # Aqui enviamos 'versao_atual' (ex: 1.0.0) em vez de "0.0.0"
+                update_avail, latest_info = check_for_update_firebase(versao_atual)
                 
                 if latest_info:
-                    self.update_info = latest_info
-                    self.ui_mode = "install"
-                    self.update_ui_for_mode()
-                    self.action_btn.setEnabled(True)
+                    rem_ver = latest_info.get("version")
+                    # Só oferece download se a remota for MAIOR que a local
+                    if version.parse(rem_ver) > version.parse(versao_atual):
+                        self.update_info = latest_info
+                        self.ui_mode = "update" # Ou install
+                        self.update_ui_for_mode()
+                        self.action_btn.setEnabled(True)
+                    else:
+                        # Servidor tem versão igual ou inferior. Iniciamos o local.
+                        QMessageBox.information(self, "Pronto", "Tudo atualizado. Iniciando...")
+                        self.close()
                 else:
-                    QMessageBox.critical(self, "Erro Pós-Ativação", "Licença ativada, mas não foi possível obter dados da versão.")
+                    # Falha ao checar update, mas se já ativou, tenta fechar pra abrir o app
                     self.close()
 
-            elif status == "limit_reached":
-                self.license_key = chave 
-                self.initial_response = response 
+            elif response.get("status") == "limit_reached":
+                self.license_key = chave
+                self.initial_response = response
                 self.ui_mode = "replace_device"
-                self.update_ui_for_mode() 
+                self.update_ui_for_mode()
                 self.action_btn.setEnabled(True)
-                self.show_replacement_dialog() 
-            
+                self.show_replacement_dialog()
             else:
-                QMessageBox.critical(self, "Erro de Ativação", 
-                                     f"Não foi possível ativar sua licença:\n\n{response.get('message')}")
+                msg = response.get("message", "Erro desconhecido")
+                QMessageBox.critical(self, "Erro", f"Falha na ativação:\n{msg}")
                 self.action_btn.setEnabled(True)
                 self.action_btn.setText("ATIVAR LICENÇA")
         
         def show_replacement_dialog(self):
-            # ... (Sem alterações) ...
             if not self.initial_response: return
             dialog = DialogoDispositivos(self.initial_response.get("devices", []), self)
             if dialog.exec():
@@ -619,7 +869,6 @@ def main():
                     self.handle_replacement(old_id) 
 
         def handle_replacement(self, old_device_id):
-            # ... (Lógica de handle_replacement - quase sem alterações) ...
             self.action_btn.setEnabled(False)
             self.action_btn.setText("Substituindo...")
             QApplication.processEvents()
@@ -633,7 +882,6 @@ def main():
                 save_launcher_config(self.config)
                 lease_manager.write_lease(response['real_expiry'], self.device_id)
 
-                # Roda a verificação de atualização PÓS-ATIVAÇÃO
                 update_avail, latest_info = check_for_update_firebase("0.0.0")
                 if latest_info:
                     self.update_info = latest_info
@@ -650,10 +898,8 @@ def main():
                 self.action_btn.setText("GERENCIAR DISPOSITIVOS")
 
         def handle_install_update(self):
-            # ... (Lógica de handle_install_update - quase sem alterações) ...
             self.action_btn.setEnabled(False)
             
-            # A versão para baixar vem do 'update_info' que pegamos do servidor
             version_to_download = self.update_info.get("version")
             if not version_to_download:
                 QMessageBox.critical(self, "Erro", "Versão de download não definida.")
@@ -666,7 +912,7 @@ def main():
             payload = {
                 "license_key": self.license_key,
                 "device_id": self.device_id,
-                "file_version": version_to_download # <-- USA A VERSÃO DO SERVIDOR
+                "file_version": version_to_download
             }
             response = firebase_client.call_firebase_function("get_download_url", payload)
             
@@ -692,14 +938,13 @@ def main():
             self.download_thread.started.connect(
                 lambda: self.download_worker.run_download_and_unzip(
                     download_url, 
-                    APP_DIR 
+                    ROOT_DIR  # <--- Baixa para a raiz para sobrescrever o app_vX.bin
                 )
             )
             self.download_thread.start()
 
         @Slot(int, int)
         def on_download_progress(self, current, total):
-            # ... (Sem alterações) ...
             if total > 0:
                 percent = (current * 100) / total
                 self.progress_bar.setValue(int(percent))
@@ -707,7 +952,6 @@ def main():
 
         @Slot(bool, str)
         def on_download_finished(self, success, message):
-            # ... (Lógica de on_download_finished - pequena alteração) ...
             self.thread_running = False
             self.download_thread.quit()
             self.download_thread.wait()
@@ -715,17 +959,24 @@ def main():
             if success:
                 self.status_label.setText("Concluído!")
                 
-                # Salva a versão que acabamos de instalar
                 version_installed = self.update_info.get("version", "0.0.0")
                 self.config["app_version"] = version_installed
                 save_launcher_config(self.config)
                 
-                self.close() 
+                # A atualização baixou um novo app_core.bin
+                # Precisamos extraí-lo novamente para atualizar a pasta segura
+                print("[Launcher] Download concluído. Iniciando extração do update...")
+                extraction_ok = ensure_core_is_ready()
+
+                if extraction_ok:
+                    self.launch_pending = True
+                    self.close() 
+                else:
+                    QMessageBox.critical(self, "Erro de Extração", "O download terminou, mas falhou ao extrair o núcleo do sistema.")
             else:
                 QMessageBox.critical(self, "Erro na Instalação", 
                                      f"A instalação falhou:\n\n{message}")
                 
-                # Volta para o modo anterior (instalar ou atualizar)
                 self.ui_mode = "install" if self.config.get("app_version", "0.0.0") == "0.0.0" else "update"
                 self.update_ui_for_mode()
                 self.action_btn.setEnabled(True)
@@ -733,12 +984,11 @@ def main():
         def closeEvent(self, event):
             if hasattr(self, 'thread_running') and self.thread_running:
                 QMessageBox.warning(self, "Download em Progresso", "Por favor, aguarde o fim do download.")
-                event.ignore() # Impede o fechamento
+                event.ignore() 
             else:
                 event.accept()
             
     # --- FIM DA CLASSE DA JANELA ---
-
 
     # 5. Inicia o aplicativo
     app = QApplication(sys.argv)
@@ -746,7 +996,9 @@ def main():
     initial_theme = "light" 
     if ui_mode != "activate" and ui_mode != "replace_device": 
         try:
-            sys.path.insert(0, APP_DIR)
+            # Tenta ler a config do APP extraído, se existir
+            # Ajuste de caminho para o LOCALAPPDATA
+            sys.path.insert(0, EXTRACT_DIR) 
             import gerenciador_config
             config_app = gerenciador_config.carregar_config()
             initial_theme = config_app.get('ui_settings', {}).get('theme', 'light') 
@@ -761,14 +1013,12 @@ def main():
                 import stylesheet_launcher 
                 qss += stylesheet_launcher.get_style_sheet()
             except ImportError:
-                print("[Launcher] 'stylesheet_launcher.py' não encontrado. Botões podem ficar sem estilo.")
                 pass 
             
             app.setStyleSheet(qss)
         except Exception as e:
             print(f"Não foi possível carregar o tema do launcher: {e}")
 
-    # Pega o 'is_mandatory' final para a lógica de 'launch'
     is_mandatory_update = update_info and update_info.get("is_mandatory", False)
 
     window = LauncherWindow(
@@ -779,46 +1029,36 @@ def main():
     )
     window.show()
     
-    app_exit_code = app.exec() 
+    app.exec() 
     
-    # --- LÓGICA FINAL MODIFICADA ---
-    final_config = get_launcher_config()
-    final_license_key = final_config.get("license_key")
-    final_app_version = final_config.get("app_version") 
-
-    # Se a janela foi fechada (não está visível) E a licença está ok
-    # E (NÃO era uma atualização obrigatória OU o usuário pulou (ui_mode != 'update'))
-    # Se a janela foi fechada (não está visível) E a licença está ok
-    # Se a janela foi fechada (não está visível) E a licença está ok
-    if (not window.isVisible()) and final_license_key and final_app_version:
+    # 2. O código só chega aqui depois que a janela fechou.
+    # Agora perguntamos para a janela (que ainda está na memória): 
+    # "A operação foi um sucesso e devo lançar o app?"
+    if window.launch_pending:
+        print("[Launcher] Sucesso confirmado. Iniciando processo principal...")
         
-        # Inicia o app se NÃO era uma atualização obrigatória pendente
-        if not is_mandatory_update:
-            print("[Launcher] Iniciando main_app após ação do launcher...")
-            
-            # 1. Gera Token
-            now_utc = datetime.now(timezone.utc).replace(microsecond=0)
-            timestamp_str = now_utc.isoformat()
-            token = hmac.new(DYNAMIC_SECRET_SALT, timestamp_str.encode('utf-8'), hashlib.sha256).hexdigest()
-            
-            # 2. Cria Dicionário de Ambiente
-            env_dict = os.environ.copy()
-            env_dict["FORMATHEUS_TOKEN"] = token
-            env_dict["FORMATHEUS_TIMESTAMP"] = timestamp_str
+        # Gera Token Novo (Para garantir que o timestamp seja atual)
+        now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+        timestamp_str = now_utc.isoformat()
+        token = hmac.new(DYNAMIC_SECRET_SALT, timestamp_str.encode('utf-8'), hashlib.sha256).hexdigest()
+        
+        env_dict = os.environ.copy()
+        env_dict["FORMATHEUS_TOKEN"] = token
+        env_dict["FORMATHEUS_TIMESTAMP"] = timestamp_str
 
-            launch_command = get_app_launch_command()
-            if launch_command:
-                # 3. Usa env_dict
-                subprocess.Popen(launch_command, env=env_dict)
-            else:
-                if app_exit_code != 0:
-                     print("[Launcher] Ação cancelada pelo usuário.")
-                else:
-                    QMessageBox.critical(None, "Erro Pós-Instalação", "O aplicativo foi instalado, mas não foi encontrado.")
+        launch_command = get_app_launch_command()
+        
+        if launch_command:
+            # close_fds=True é o SEGREDO. 
+            # Ele diz ao Windows: "Não mate este novo processo se o processo pai (Launcher) morrer".
+            subprocess.Popen(launch_command, env=env_dict, close_fds=True)
         else:
-             print("[Launcher] Atualização obrigatória não foi concluída. App não será iniciado.")
-                
-    sys.exit(app_exit_code)
+            print("[Launcher] Erro: Comando não encontrado.")
+    
+    else:
+        print("[Launcher] Encerrado sem lançar (usuário fechou ou erro).")
+
+    sys.exit(0)
 
 
 if __name__ == "__main__":

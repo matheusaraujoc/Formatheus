@@ -31,13 +31,20 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 # --- Constantes ---
-LEASE_FILE_NAME = resource_path("license.lease")
-LEASE_DURATION_DAYS = 7 # O "lease" offline expira após 7 dias
+# [MODIFICAÇÃO] Salva o lease na AppData (persistência para Nuitka --onefile)
+LOCAL_APP_DATA = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+BASE_DIR = os.path.join(LOCAL_APP_DATA, "Formatheus")
+
+# Garante que a pasta exista (caso o lease_manager seja chamado isoladamente)
+try:
+    os.makedirs(BASE_DIR, exist_ok=True)
+except: pass
+
+LEASE_FILE_NAME = os.path.join(BASE_DIR, "license.lease")
+LEASE_DURATION_DAYS = 7 
 
 # IMPORTANTE: Esta é a "pimenta" (segredo) do app.
-# Mude para qualquer string aleatória e complexa.
-# Ela é compilada no .exe e impede que um 'lease' seja copiado para outra máquina.
-PEPPER = b'63YAFUVEWRW4NCR3DF5E4OST3R53Q2' 
+PEPPER = b'63YAFUVEWRW4NCR3DF5E4OST3R53Q2'
 
 # --- Funções de Criptografia ---
 
